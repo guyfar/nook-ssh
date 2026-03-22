@@ -1,79 +1,72 @@
 # Nook (`nk`)
 
-Nook is a lightweight SSH bookmark manager for people who live in the terminal.
+> SSH jumpbox for humans.
 
-It gives your servers a clean home in one small Bash tool: searchable picker, grouped entries, SSH key setup, reachability checks, and a branded terminal experience that is ready for open-source distribution.
+Nook is a polished SSH bookmark manager for people who spend real time in the terminal. It keeps server access fast and organized without turning your workflow into a heavyweight dashboard.
+
+You get a branded picker, recent-server pinning, grouped entries, key setup, reachability checks, diagnostics, and a clean migration path from the original `ssh-manager` layout.
 
 中文说明见 `README.zh-CN.md`.
 
 ## Why Nook
 
-- Short primary command: `nk`
-- Lightweight implementation with minimal dependencies
-- Built for personal and small-team SSH workflows
-- Uses one clear primary command instead of a risky one-letter shortcut
-
-## Features
-
-- Interactive server picker powered by `fzf`
-- Grouped server catalog
-- SSH key setup with `ssh-copy-id`
-- Reachability check with `nc`
+- Clean primary command: `nk`
+- Single-file Bash implementation with minimal operational overhead
+- Fast interactive picker powered by `fzf`
+- Server catalog with groups, notes, and recent-history pinning
+- Built-in key setup, reachability checks, and diagnostics
 - Automatic migration from `~/.ssh-manager` to `~/.config/nook`
-- `nk doctor` diagnostics for support and debugging
 
-## Install
+## Quick Start
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/guyfar/nook-ssh/main/install.sh | bash
+nk add
+nk
 ```
 
-After installation, the primary command is `nk`.
-
-Nook stores config in `~/.config/nook/` by default. If it finds an existing `~/.ssh-manager/` config, it migrates it automatically.
-
-## Preview
+By default Nook stores data in:
 
 ```text
-$ nk
-    _   __            __
-   / | / /___  ____  / /__
-  /  |/ / __ \/ __ \/ //_/
- / /|  / /_/ / /_/ / ,<
-/_/ |_/\____/\____/_/|_|
-
-  SSH jumpbox for humans
-
-  [production]
-    1) prod-web-01        1.2.3.4          :22    root     key  web node
-    2) prod-db-01         1.2.3.6          :3306  root     pwd  primary db
+~/.config/nook/
 ```
 
-## Usage
+If an existing `~/.ssh-manager/` config is present, Nook imports it automatically.
+
+## Experience
+
+Nook is designed to feel like a proper terminal product, not just a helper script:
+
+- Branded TUI with preview pane and keyboard-first flow
+- Recent servers stay pinned at the top of the picker
+- Password and key-based authentication handled in one place
+- Config stays human-readable and easy to version or back up
+
+## Commands
 
 | Command | Description |
 |------|------|
-| `nk` | Open the interactive server picker |
+| `nk` | Open the interactive picker |
 | `nk add` | Add a server |
 | `nk rm` | Remove a server |
-| `nk list` | List all servers |
+| `nk list` | List all configured servers |
 | `nk edit` | Edit the config file |
 | `nk key` | Configure SSH key login |
 | `nk ping` | Check server reachability |
 | `nk doctor` | Show environment diagnostics |
-| `nk <keyword>` | Search and connect |
+| `nk <keyword>` | Search and connect directly |
 | `nk version` | Show version |
 | `nk help` | Show help |
 
 ## Configuration
 
-The default config file is:
+Default config file:
 
 ```text
 ~/.config/nook/servers.conf
 ```
 
-You can override the config directory with:
+Optional override:
 
 ```bash
 export NOOK_CONFIG_DIR=/path/to/custom-config-dir
@@ -85,16 +78,17 @@ Config format:
 # Format : name | host | port | user | password(optional) | description
 
 [production]
-# prod-web-01 | 1.2.3.4 | 22 | root | yourpass | production web node
-# prod-web-02 | 1.2.3.5 | 22 | root |          | production web node 2
+# prod-web-01 | 1.2.3.4 | 22   | root | yourpass  | production web node
+# prod-web-02 | 1.2.3.5 | 22   | root |           | production web node 2
 # prod-db-01  | 1.2.3.6 | 3306 | root | dbpass123 | primary database
 ```
+
+Empty password means Nook will use SSH key login.
 
 ## SSH Key Setup
 
 ```bash
 nk key
-nk add
 ```
 
 Nook detects an existing SSH public key automatically. If none exists, it generates an `ed25519` key and pushes it with `ssh-copy-id`.
@@ -118,13 +112,11 @@ sudo yum install fzf
 
 ## Diagnostics
 
-When someone reports an installation or connection issue, ask them to run:
-
 ```bash
 nk doctor
 ```
 
-This prints version, config paths, server count, and dependency availability for `ssh`, `fzf`, and `sshpass`.
+Use `nk doctor` when installation or connection reports need to be debugged. It prints version, config paths, server count, and dependency availability for `ssh`, `fzf`, and `sshpass`.
 
 ## Development
 
@@ -139,7 +131,7 @@ bash -n nk install.sh
 NOOK_INSTALL_DIR=/tmp/nook-bin XDG_CONFIG_HOME=/tmp/nook-xdg bash ./install.sh
 ```
 
-See `CONTRIBUTING.md`, `CHANGELOG.md`, and `RELEASE_CHECKLIST.md` for project workflow details.
+Project workflow details live in `CONTRIBUTING.md`, `CHANGELOG.md`, and `RELEASE_CHECKLIST.md`.
 
 ## Uninstall
 

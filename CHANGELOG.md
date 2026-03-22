@@ -6,7 +6,10 @@ The format loosely follows Keep a Changelog.
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+### Changed
+
+- Refined the `fzf` picker layout with a cleaner two-panel TUI, softer metadata tags, pinned recent servers, and richer preview details.
+- Reworked the README copy and structure to present Nook more clearly as a polished open-source terminal product.
 
 ## [1.1.0] - 2026-03-22
 
