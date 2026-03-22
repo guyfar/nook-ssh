@@ -1,5 +1,7 @@
 # Nook (`nk`)
 
+[中文](./README.zh-CN.md)
+
 > SSH jumpbox for humans.
 
 Nook is a polished SSH bookmark manager for people who spend real time in the terminal. It keeps server access fast and organized without turning your workflow into a heavyweight dashboard.
