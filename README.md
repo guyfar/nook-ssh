@@ -2,24 +2,9 @@
 
 [中文](./README.zh-CN.md)
 
-> SSH jumpbox for humans.
+Save SSH servers, search, and press Enter to connect. A single-file Bash tool with groups, notes, and recent-server ordering.
 
-Nook is a polished SSH bookmark manager for people who spend real time in the terminal. It keeps server access fast and organized without turning your workflow into a heavyweight dashboard.
-
-You get a branded picker, recent-server pinning, grouped entries, key setup, reachability checks, diagnostics, and a clean migration path from the original `ssh-manager` layout.
-
-中文说明见 `README.zh-CN.md`.
-
-## Why Nook
-
-- Clean primary command: `nk`
-- Single-file Bash implementation with minimal operational overhead
-- Fast interactive picker powered by `fzf`
-- Server catalog with groups, notes, and recent-history pinning
-- Built-in key setup, reachability checks, and diagnostics
-- Automatic migration from `~/.ssh-manager` to `~/.config/nook`
-
-## Quick Start
+## Quick start
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/guyfar/nook-ssh/main/install.sh | bash
@@ -27,121 +12,85 @@ nk add
 nk
 ```
 
-By default Nook stores data in:
+Adding a server takes two inputs: its address and a name. Enter `ubuntu@example.com` or paste `ssh ubuntu@example.com -p 2222`. The default port is `22`; an omitted username keeps the existing `root` default.
 
-```text
-~/.config/nook/
+You can also pass an address and then confirm its name:
+
+```bash
+nk add ubuntu@example.com
+nk add 'ssh ubuntu@example.com -p 2222'
 ```
 
-If an existing `~/.ssh-manager/` config is present, Nook imports it automatically.
+Supported input: `[user@]host`, IPv6, and the `-p` and `-l` options. Other SSH options and remote commands are rejected explicitly. Pasted input is never evaluated as a shell command.
 
-## Experience
+## Everyday use
 
-Nook is designed to feel like a proper terminal product, not just a helper script:
+- `nk`: search names, hosts, usernames, groups, or notes. Recently used servers appear first.
+- `nk <name>`: connect immediately when the name matches exactly one entry; otherwise open the picker.
+- In the picker: **Enter** to connect, **Tab** to toggle details, **Esc** to cancel.
+- Without `fzf`, choose a numbered entry or press Enter to cancel.
+- Running `nk` in a terminal with an empty catalog starts the add flow.
 
-- Branded TUI with preview pane and keyboard-first flow
-- Recent servers stay pinned at the top of the picker
-- Password and key-based authentication handled in one place
-- Config stays human-readable and easy to version or back up
+SSH handles keys, ssh-agent, or password prompts by default. No saved password is required.
 
-## Commands
+For a group, note, or saved password, use:
+
+```bash
+nk add --advanced
+```
+
+Saved passwords are stored as plain text in the local config, with file permissions set to `600`. Automatically filling a saved password requires `sshpass`; without it, Nook uses normal SSH login.
+
+## Other commands
 
 | Command | Description |
-|------|------|
-| `nk` | Open the interactive picker |
-| `nk add` | Add a server |
-| `nk rm` | Remove a server |
-| `nk list` | List all configured servers |
-| `nk edit` | Edit the config file |
-| `nk key` | Configure SSH key login |
-| `nk ping` | Check server reachability |
+|---------|-------------|
+| `nk list` | List servers |
+| `nk rm` | Choose and confirm removal of a server |
+| `nk edit` | Edit the config with `$EDITOR`, defaulting to Vim |
+| `nk key` | Choose a server and configure SSH key login |
+| `nk ping` | Check server port reachability |
 | `nk doctor` | Show environment diagnostics |
-| `nk <keyword>` | Search and connect directly |
 | `nk version` | Show version |
 | `nk help` | Show help |
 
 ## Configuration
 
-Default config file:
-
-```text
-~/.config/nook/servers.conf
-```
-
-Optional override:
+The default file is `~/.config/nook/servers.conf`. `XDG_CONFIG_HOME` is supported, or set an explicit directory:
 
 ```bash
 export NOOK_CONFIG_DIR=/path/to/custom-config-dir
 ```
 
-Config format:
+The existing config format is unchanged:
 
 ```conf
-# Format : name | host | port | user | password(optional) | description
-
+# name | host | port | user | password(optional) | description
 [production]
-# prod-web-01 | 1.2.3.4 | 22   | root | yourpass  | production web node
-# prod-web-02 | 1.2.3.5 | 22   | root |           | production web node 2
-# prod-db-01  | 1.2.3.6 | 3306 | root | dbpass123 | primary database
+web-prod | 192.0.2.10 | 22 | ubuntu | | production web server
 ```
 
-Empty password means Nook will use SSH key login.
+New names must be unique. Ports must be `1–65535`; fields cannot contain `|`, tabs, or line breaks. Invalid manually edited entries report their file location instead of being skipped silently. Existing duplicate names always require selection rather than connecting directly.
 
-## SSH Key Setup
+An existing `~/.ssh-manager/` catalog is migrated automatically unless `NOOK_CONFIG_DIR` is set.
 
-```bash
-nk key
-```
+## Dependencies and development
 
-Nook detects an existing SSH public key automatically. If none exists, it generates an `ed25519` key and pushes it with `ssh-copy-id`.
-
-## Dependencies
-
-- `bash` 4.0+
-- `fzf` optional, recommended
-- `sshpass` optional, only needed for password-based login
+- Bash 3.2+, OpenSSH, and common Unix utilities.
+- `fzf`: optional, for interactive search.
+- `sshpass`: optional, for automatically filling saved passwords.
+- `ssh-copy-id`: only for key setup; `nc`: only for reachability checks.
 
 ```bash
-# macOS
-brew install fzf
-
-# Debian / Ubuntu
-sudo apt install fzf
-
-# CentOS / RHEL
-sudo yum install fzf
-```
-
-## Diagnostics
-
-```bash
-nk doctor
-```
-
-Use `nk doctor` when installation or connection reports need to be debugged. It prints version, config paths, server count, and dependency availability for `ssh`, `fzf`, and `sshpass`.
-
-## Development
-
-```bash
-# syntax check
 bash -n nk install.sh
-
-# help
+python3 -m unittest discover -s tests -v
 ./nk help
-
-# local install into temp directories
-NOOK_INSTALL_DIR=/tmp/nook-bin XDG_CONFIG_HOME=/tmp/nook-xdg bash ./install.sh
+./nk doctor
 ```
 
-Project workflow details live in `CONTRIBUTING.md`, `CHANGELOG.md`, and `RELEASE_CHECKLIST.md`.
+Tests use temporary catalogs and fake SSH commands; they never connect to real servers. Python is needed only for tests, not for using Nook.
 
-## Uninstall
-
-```bash
-sudo rm /usr/local/bin/nk
-rm -rf ~/.config/nook
-rm -rf ~/.ssh-manager
-```
+See [CONTRIBUTING.md](./CONTRIBUTING.md) and [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md) for the project workflow.
 
 ## License
 

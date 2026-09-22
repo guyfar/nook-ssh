@@ -22,12 +22,13 @@ Use this before publishing a new Nook release.
 ## Quality
 
 - Run `bash -n nk install.sh`
+- Run `python3 -m unittest discover -s tests -v`
 - Run `./nk help`
 - Run `./nk doctor`
 - Test install flow with:
 
 ```bash
-NOOK_INSTALL_DIR=/tmp/nook-bin XDG_CONFIG_HOME=/tmp/nook-xdg bash ./install.sh
+NOOK_INSTALL_DIR=/tmp/nook-bin NOOK_CONFIG_DIR=/tmp/nook-config bash ./install.sh
 ```
 
 - Test both:

@@ -2,18 +2,7 @@
 
 [English](./README.md)
 
-> 为终端重度用户准备的 SSH jumpbox。
-
-`Nook` 是一个更像“正式产品”的 SSH 服务器书签工具。它保留了单文件 Bash 工具的轻量特性，同时把品牌、交互体验、诊断能力和开源项目表面都整理到了一个更专业的状态。
-
-## 为什么用 Nook
-
-- 主命令简洁稳定：`nk`
-- `fzf` 驱动的交互式服务器选择器
-- 支持服务器分组、备注和最近使用置顶
-- 内置 SSH 免密配置和连通性检测
-- 自动从 `~/.ssh-manager` 迁移到 `~/.config/nook`
-- 提供 `nk doctor` 诊断命令，方便排查环境问题
+保存 SSH 服务器，搜索后回车连接。单文件 Bash 工具，支持分组、备注和最近使用排序。
 
 ## 快速开始
 
@@ -23,100 +12,85 @@ nk add
 nk
 ```
 
-默认配置目录：
+添加时只需输入地址和名称。地址可以是 `ubuntu@example.com`，也可以粘贴 `ssh ubuntu@example.com -p 2222`。默认端口为 `22`，省略用户名时沿用 `root`。
 
-```text
-~/.config/nook/
+也可以直接传入地址，再确认名称：
+
+```bash
+nk add ubuntu@example.com
+nk add 'ssh ubuntu@example.com -p 2222'
 ```
 
-如果检测到旧版 `~/.ssh-manager/` 配置，Nook 会自动导入。
+支持 `[user@]host`、IPv6，以及 `-p` 和 `-l` 参数。其他 SSH 参数和远程命令会明确报错，不会执行粘贴的命令。
 
-## 使用体验
+## 日常使用
 
-Nook 不是简单地把 SSH 地址堆在一个脚本里，而是把常用流程收成一套更顺手的终端体验：
+- `nk`：搜索名称、地址、用户名、分组或备注；最近使用的服务器优先展示。
+- `nk 名称`：名称完全匹配且唯一时直接连接；否则打开选择器。
+- 选择器中按 **Enter** 连接、**Tab** 展开或收起详情、**Esc** 取消。
+- 未安装 `fzf` 时，用编号选择；直接回车取消。
+- 首次在终端运行 `nk`，没有服务器时直接进入添加流程。
 
-- 带品牌感的 TUI 选择器和预览面板
-- 最近使用的服务器自动排在前面
-- 密码登录和密钥登录统一管理
-- 配置文件保持纯文本，可读、可备份、可版本管理
+默认由 SSH 处理密钥、ssh-agent 或密码输入，无需先保存密码。
 
-## 命令
+需要分组、备注或保存密码时使用：
+
+```bash
+nk add --advanced
+```
+
+保存的密码以明文写入本地配置，文件权限为 `600`。自动填写保存的密码需要 `sshpass`；未安装时使用普通 SSH 登录。
+
+## 其他命令
 
 | 命令 | 功能 |
 |------|------|
-| `nk` | 打开交互式选择器 |
-| `nk add` | 添加服务器 |
-| `nk rm` | 删除服务器 |
 | `nk list` | 列出服务器 |
-| `nk edit` | 编辑配置 |
-| `nk key` | 配置 SSH 免密 |
-| `nk ping` | 检测连通性 |
-| `nk doctor` | 输出诊断信息 |
-| `nk <关键词>` | 搜索并连接 |
+| `nk rm` | 选择并确认删除服务器 |
+| `nk edit` | 使用 `$EDITOR` 编辑配置，默认为 Vim |
+| `nk key` | 选择服务器，配置 SSH 免密登录 |
+| `nk ping` | 检查服务器端口连通性 |
+| `nk doctor` | 查看环境诊断 |
+| `nk version` | 显示版本 |
 | `nk help` | 显示帮助 |
 
 ## 配置
 
-默认配置文件：
-
-```text
-~/.config/nook/servers.conf
-```
-
-自定义配置目录：
+默认文件为 `~/.config/nook/servers.conf`，支持 `XDG_CONFIG_HOME`，也可单独覆盖：
 
 ```bash
 export NOOK_CONFIG_DIR=/path/to/custom-config-dir
 ```
 
-配置格式：
+配置格式保持不变：
 
 ```conf
-# Format : name | host | port | user | password(optional) | description
-
+# name | host | port | user | password(optional) | description
 [production]
-# prod-web-01 | 1.2.3.4 | 22   | root | yourpass  | production web node
-# prod-web-02 | 1.2.3.5 | 22   | root |           | production web node 2
-# prod-db-01  | 1.2.3.6 | 3306 | root | dbpass123 | primary database
+web-prod | 192.0.2.10 | 22 | ubuntu | | production web server
 ```
 
-密码留空时表示使用 SSH 密钥登录。
+新增名称必须唯一，端口范围为 `1–65535`，字段不能包含 `|`、制表符或换行。手动编辑后的无效条目会提示文件位置，不会静默跳过。已有同名条目仍需手动选择，不会直接连接。
 
-## 免密配置
+检测到旧版 `~/.ssh-manager/` 时自动迁移；设置 `NOOK_CONFIG_DIR` 后不自动迁移。
 
-```bash
-nk key
-```
+## 依赖与开发
 
-Nook 会自动检测本地公钥；如果没有，会生成 `ed25519` 密钥并通过 `ssh-copy-id` 下发到目标服务器。
-
-## 依赖
-
-- `bash` 4.0+
-- `fzf` 可选但强烈推荐
-- `sshpass` 可选，仅密码登录时需要
-
-## 诊断
-
-```bash
-nk doctor
-```
-
-它会输出版本、配置路径、服务器数量，以及 `ssh` / `fzf` / `sshpass` 的可用性，便于定位安装和连接问题。
-
-## 开发
+- Bash 3.2+、OpenSSH，以及常见 Unix 命令。
+- `fzf`：可选，用于交互式搜索。
+- `sshpass`：可选，用于自动填写保存的密码。
+- `ssh-copy-id`：仅配置免密登录时需要；`nc`：仅连通性检查时需要。
 
 ```bash
 bash -n nk install.sh
+python3 -m unittest discover -s tests -v
 ./nk help
-NOOK_INSTALL_DIR=/tmp/nook-bin XDG_CONFIG_HOME=/tmp/nook-xdg bash ./install.sh
+./nk doctor
 ```
 
-项目协作与发布说明见：
+测试使用临时配置和模拟 SSH 命令，不连接真实服务器。Python 仅用于测试，日常使用不需要。
 
-- `CONTRIBUTING.md`
-- `CHANGELOG.md`
-- `RELEASE_CHECKLIST.md`
+协作与发布流程见 [CONTRIBUTING.md](./CONTRIBUTING.md) 和 [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md)。
 
 ## License
 

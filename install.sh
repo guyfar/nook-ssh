@@ -20,7 +20,7 @@ RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 INSTALL_DIR="${NOOK_INSTALL_DIR:-/usr/local/bin}"
 PRIMARY_BIN="nk"
 XDG_CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}"
-CONFIG_DIR="$XDG_CONFIG_ROOT/nook"
+CONFIG_DIR="${NOOK_CONFIG_DIR:-$XDG_CONFIG_ROOT/nook}"
 CONFIG_FILE="$CONFIG_DIR/servers.conf"
 LEGACY_CONFIG_DIR="$HOME/.ssh-manager"
 # Apple Silicon Mac 优先用 /opt/homebrew/bin
@@ -47,7 +47,7 @@ write_default_config() {
 # ============================================
 # Format : name | host | port | user | password(optional) | description
 # Group  : lines like [group-name]
-# Notes  : password empty means SSH key login
+# Notes  : password empty uses standard SSH authentication
 # ============================================
 
 [default]
@@ -143,7 +143,7 @@ fi
 # --- Step 4: 初始化配置 ---
 echo -e "${DIM}[4/4] initialize config ...${NC}"
 mkdir -p "$CONFIG_DIR"
-if [[ -f "${LEGACY_CONFIG_DIR}/servers.conf" && ! -f "$CONFIG_FILE" ]]; then
+if [[ -z "${NOOK_CONFIG_DIR:-}" && -f "${LEGACY_CONFIG_DIR}/servers.conf" && ! -f "$CONFIG_FILE" ]]; then
     cp "${LEGACY_CONFIG_DIR}/servers.conf" "$CONFIG_FILE"
     [[ -f "${LEGACY_CONFIG_DIR}/.history" ]] && cp "${LEGACY_CONFIG_DIR}/.history" "${CONFIG_DIR}/.history"
     echo -e "${GREEN}  [ok] migrated existing config from ${LEGACY_CONFIG_DIR}${NC}"
