@@ -9,6 +9,12 @@ set -euo pipefail
 BRAND_NAME="Nook"
 PRIMARY_CMD="nk"
 VERSION="1.1.0"
+SSH_OPTIONS=(
+    -o ConnectTimeout=10
+    -o ServerAliveInterval=60
+    -o ServerAliveCountMax=3
+    -o StrictHostKeyChecking=accept-new
+)
 
 XDG_CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}"
 CONFIG_DIR="${NOOK_CONFIG_DIR:-$XDG_CONFIG_ROOT/nook}"
@@ -60,22 +66,32 @@ validate_field() {
     fi
 }
 
-validate_server() {
-    local name="$1" host="$2" port="$3" user="$4"
+validate_name() {
+    local name="$1"
     [[ -n "$name" ]] || { fail 'name cannot be empty'; return 1; }
     validate_field Name "$name" || return 1
     if [[ "$name" == \#* || "$name" == \[* ]]; then
         fail 'name cannot start with # or ['
         return 1
     fi
-    if [[ -z "$host" || "$host" == -* || ! "$host" =~ ^[[:alnum:]_.:%-]+$ ]]; then
-        fail 'enter a hostname, IP address, or SSH host alias'
-        return 1
-    fi
+}
+
+validate_port() {
+    local port="$1"
     if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
         fail 'port must be a number from 1 to 65535'
         return 1
     fi
+}
+
+validate_server() {
+    local name="$1" host="$2" port="$3" user="$4"
+    validate_name "$name" || return 1
+    if [[ -z "$host" || "$host" == -* || ! "$host" =~ ^[[:alnum:]_.:%-]+$ ]]; then
+        fail 'enter a hostname, IP address, or SSH host alias'
+        return 1
+    fi
+    validate_port "$port" || return 1
     if [[ -z "$user" || "$user" == -* || "$user" =~ [[:space:]@\|] ]]; then
         fail 'enter a username without spaces, @, or |'
         return 1
@@ -231,39 +247,46 @@ server_at_line() {
 }
 
 render_fzf_preview() {
-    local servers record group name host port user pass desc rank
+    local servers record group name host port user pass desc
     servers=$(parse_servers) || return 1
     record=$(server_at_line "$1" "$servers") || return 1
     IFS='|' read -r group name host port user pass desc <<< "$record"
-    rank=$(get_history_rank "$name")
-    printf '%s\n' "$name" "${user}@${host}:${port}" "Group: $group"
-    if [[ -n "$pass" ]]; then
+    printf '%s [%s]\n%s@%s:%s\n' "$name" "$group" "$user" "$host" "$port"
+    [[ -z "$desc" ]] || printf 'Note: %s\n' "$desc"
+    if [[ -n "$pass" ]] && command -v sshpass >/dev/null 2>&1; then
         printf 'Login: saved password\n'
+    elif [[ -n "$pass" ]]; then
+        printf 'Login: SSH prompt (sshpass is not installed)\n'
     else
         printf 'Login: SSH (key, agent, or password prompt)\n'
     fi
-    [[ "$rank" -eq 999 ]] || printf 'Recent: #%s\n' "$rank"
-    [[ -z "$desc" ]] || printf '\n%s\n' "$desc"
+    printf '\nSSH command:\n'
+    print_ssh_command "$host" "$port" "$user"
+}
+
+print_ssh_command() {
+    printf '%q ' ssh "${SSH_OPTIONS[@]}" -p "$2"
+    printf '%q\n' "$3@$1"
+}
+
+format_table() {
+    # column handles terminal widths of CJK names; plain spacing remains usable without it.
+    if command -v column >/dev/null 2>&1; then
+        column -t -s '|'
+    else
+        awk -F'|' '{ for (i = 1; i <= NF; i++) printf "%s%s", $i, (i == NF ? "\n" : "  ") }'
+    fi
 }
 
 connect_server() {
     local host="$1" port="$2" user="$3" name="$4" pass="${5:-}"
     record_history "$name"
-    echo -e "${GREEN}[connect]${NC} ${BOLD}${name}${NC} ${DIM}${user}@${host}:${port}${NC}"
-    echo ""
-
-    local ssh_opts=(
-        -o ConnectTimeout=10
-        -o ServerAliveInterval=60
-        -o ServerAliveCountMax=3
-        -o StrictHostKeyChecking=accept-new
-        -p "$port"
-    )
+    printf '%b[connect]%b %s  %s@%s:%s\n\n' "$GREEN" "$NC" "$name" "$user" "$host" "$port"
 
     if [[ -n "$pass" ]] && command -v sshpass >/dev/null 2>&1; then
-        sshpass -p "$pass" ssh "${ssh_opts[@]}" "${user}@${host}"
+        sshpass -p "$pass" ssh "${SSH_OPTIONS[@]}" -p "$port" "${user}@${host}"
     else
-        ssh "${ssh_opts[@]}" "${user}@${host}"
+        ssh "${SSH_OPTIONS[@]}" -p "$port" "${user}@${host}"
     fi
 }
 
@@ -273,35 +296,45 @@ select_with_fzf() {
     [[ -n "$servers" ]] || { fail "no servers configured; run: ${PRIMARY_CMD} add"; return 1; }
 
     # Only a row ID and searchable display text go through fzf, never passwords.
-    local rows="" row display record group name host port user pass desc rank idx=0 marker
+    local rows="" row record group name host port user pass desc rank idx=0 marker
     while IFS= read -r record; do
         idx=$((idx + 1))
         IFS='|' read -r group name host port user pass desc <<< "$record"
         rank=$(get_history_rank "$name")
-        marker=' '
-        [[ "$rank" -ge 6 ]] || marker='•'
-        printf -v display '%s %-18s  %s@%s:%s  [%s]%s' \
-            "$marker" "$name" "$user" "$host" "$port" "$group" "${desc:+  $desc}"
-        printf -v row '%s\t%s\t%s' "$rank" "$idx" "$display"
+        marker=''
+        [[ "$rank" -ge 6 ]] || marker=' •'
+        printf -v row '%s|%s|%s%s|[%s]|%s@%s:%s|%s' \
+            "$rank" "$idx" "$name" "$marker" "$group" "$user" "$host" "$port" "$desc"
         rows+="$row"$'\n'
     done <<< "$servers"
 
     local preview_cmd selected status selected_line
     printf -v preview_cmd '%q __preview {1}' "$0"
-    if selected=$(printf '%s' "$rows" | sort -t$'\t' -k1,1n -k3,3f | cut -f2- | \
+    if selected=$({
+        printf '0|NAME|GROUP|USER@HOST:PORT|NOTE\n'
+        printf '%s' "$rows" | sort -t'|' -k1,1n -k3,3f | cut -d'|' -f2-
+    } | format_table | awk '{
+        id = $1
+        sub(/^[^[:space:]]+[[:space:]]+/, "")
+        printf "%s\t%s\n", id, $0
+    }' | \
         FZF_DEFAULT_OPTS='' FZF_DEFAULT_OPTS_FILE='' fzf \
             --delimiter=$'\t' \
             --with-nth=2.. \
+            --header-lines=1 \
             --header="Enter ${action} · Tab details · Esc cancel" \
             --prompt='Search > ' \
-            --height=~60% \
+            --height=~80% \
             --layout=reverse \
             --border=rounded \
             --border-label=' Nook ' \
             --query="$filter" \
             --preview="$preview_cmd" \
-            --preview-window='down,6,hidden,wrap' \
-            --bind='tab:toggle-preview' \
+            --preview-window='down,65%,hidden,wrap' \
+            --preview-label=' Details · Alt+Up/Down scroll ' \
+            --bind='tab:toggle-preview,alt-up:preview-up,alt-down:preview-down' \
+            --pointer='>' \
+            --color='fg+:bold,hl+:bold:underline,pointer:cyan,header:dim' \
             --tiebreak=index \
             --no-multi); then
         selected_line=${selected%%$'\t'*}
@@ -323,7 +356,7 @@ select_fallback() {
     [[ -n "$servers" ]] || { fail "no servers configured; run: ${PRIMARY_CMD} add"; return 1; }
 
     local -a records=()
-    local record group name host port user pass desc idx=0 choice
+    local record group name host port user pass desc idx=0 choice rows='#|NAME|GROUP|USER@HOST:PORT|NOTE' row
     printf 'Nook — choose a server to %s\n' "$action" >&2
     while IFS= read -r record; do
         IFS='|' read -r group name host port user pass desc <<< "$record"
@@ -332,11 +365,12 @@ select_fallback() {
         fi
         records+=("$record")
         idx=$((idx + 1))
-        printf '  %d) %-18s %s@%s:%s [%s]%s\n' \
-            "$idx" "$name" "$user" "$host" "$port" "$group" "${desc:+  $desc}" >&2
+        printf -v row '%s)|%s|[%s]|%s@%s:%s|%s' "$idx" "$name" "$group" "$user" "$host" "$port" "$desc"
+        rows+=$'\n'"$row"
     done <<< "$servers"
 
     [[ "$idx" -gt 0 ]] || { fail 'no server matched; try another keyword'; return 1; }
+    printf '%s\n' "$rows" | format_table >&2
     printf 'Pick [1-%s], or Enter to cancel: ' "$idx" >&2
     read -r choice || return 130
     [[ -n "$choice" && "$choice" != q ]] || return 130
@@ -500,73 +534,116 @@ parse_address() {
         fail 'specify the port with -p, for example: ubuntu@example.com -p 2222'
         return 1
     fi
-    validate_server "$host" "$host" "$port" "$user" || return 1
-    printf '%s|%s|%s\n' "$host" "$((10#$port))" "$user"
+    # Validate the destination here; cmd_add can retry the port independently.
+    validate_server "$host" "$host" 22 "$user" || return 1
+    printf '%s|%s|%s\n' "$host" "$port" "$user"
 }
 
-cmd_add() {
-    local advanced=false address parsed host port user name pass='' desc='' group=default
-    local servers record existing_group existing_name entry
-    if [[ "${1:-}" == --advanced ]]; then
-        advanced=true
-        shift
-    fi
-    printf 'Add a server\n'
-    if [[ "$advanced" == false ]]; then
-        printf 'Optional group, note, saved password: %s add --advanced\n\n' "$PRIMARY_CMD"
-    fi
-    address="$*"
-    if [[ -z "$address" ]]; then
-        printf 'Address (user@host or ssh command): ' >&2
-        read -r address || return 1
-    fi
-    address=$(trim_field "$address")
-    parsed=$(parse_address "$address") || return 1
-    IFS='|' read -r host port user <<< "$parsed"
-
-    printf 'Name [%s]: ' "$host" >&2
-    read -r name || return 1
-    name=$(trim_field "$name")
-    name=${name:-$host}
-    validate_server "$name" "$host" "$port" "$user" || return 1
+validate_new_name() {
+    local name="$1" servers="$2" existing_group existing_name record
+    validate_name "$name" || return 1
     case "$name" in
         add|rm|remove|del|delete|list|ls|l|edit|key|keys|ping|check|doctor|diag|debug|help|--help|-h|version|--version|-v|__preview)
             fail "'${name}' is a command name; choose a different server name"
             return 1
             ;;
     esac
-    servers=$(parse_servers) || return 1
-    if [[ -n "$servers" ]]; then
-        while IFS='|' read -r existing_group existing_name record; do
-            if [[ "$existing_name" == "$name" ]]; then
-                fail "a server named '${name}' already exists; choose a different name"
-                return 1
-            fi
-        done <<< "$servers"
+    while IFS='|' read -r existing_group existing_name record; do
+        if [[ "$existing_name" == "$name" ]]; then
+            fail "a server named '${name}' already exists; choose a different name"
+            return 1
+        fi
+    done <<< "$servers"
+}
+
+
+cmd_add() {
+    local advanced=false address parsed host port user name pass='' desc='' group=default
+    local servers entry tty_state restore_terminal password_status
+    if [[ "${1:-}" == --advanced ]]; then
+        advanced=true
+        shift
     fi
+    servers=$(parse_servers) || return 1
+    printf 'Add a server\n'
+    if [[ "$advanced" == false ]]; then
+        printf 'Optional group, note, saved password: %s add --advanced\n\n' "$PRIMARY_CMD"
+    fi
+    address="$*"
+    while true; do
+        if [[ -z "$address" ]]; then
+            printf 'Address (user@host or ssh command): ' >&2
+            read -r address || return 1
+        fi
+        address=$(trim_field "$address")
+        if parsed=$(parse_address "$address"); then break; fi
+        [[ -t 0 ]] || return 1
+        address=''
+    done
+    IFS='|' read -r host port user <<< "$parsed"
+    until validate_port "$port"; do
+        [[ -t 0 ]] || return 1
+        printf 'Port [22]: ' >&2
+        read -r port || return 1
+        port=$(trim_field "$port")
+        port=${port:-22}
+    done
+    port=$((10#$port))
+    printf 'Target: %s@%s:%s\n' "$user" "$host" "$port"
+
+    while true; do
+        printf 'Name [%s]: ' "$host" >&2
+        read -r name || return 1
+        name=$(trim_field "$name")
+        name=${name:-$host}
+        if validate_new_name "$name" "$servers"; then break; fi
+        [[ -t 0 ]] || return 1
+    done
 
     if [[ "$advanced" == true ]]; then
-        printf 'Group [default]: ' >&2
-        read -r group || return 1
-        group=$(trim_field "$group")
-        group=${group:-default}
-        validate_field Group "$group" || return 1
-        if [[ "$group" == *'['* || "$group" == *']'* ]]; then
-            fail 'group cannot contain [ or ]'
-            return 1
-        fi
-        printf 'Note [optional]: ' >&2
-        read -r desc || return 1
-        desc=$(trim_field "$desc")
-        validate_field Note "$desc" || return 1
-        printf 'Save password in config [blank to let SSH handle login]: ' >&2
-        IFS= read -r -s pass || return 1
-        printf '\n' >&2
-        validate_field Password "$pass" || return 1
-        if [[ "$pass" != "$(trim_field "$pass")" ]]; then
-            fail 'saved passwords cannot start or end with whitespace; leave blank to enter the password in SSH'
-            return 1
-        fi
+        while true; do
+            printf 'Group [default]: ' >&2
+            read -r group || return 1
+            group=$(trim_field "$group")
+            group=${group:-default}
+            if validate_field Group "$group"; then
+                if [[ "$group" != *'['* && "$group" != *']'* ]]; then break; fi
+                printf '[x] group cannot contain [ or ]\n' >&2
+            fi
+            [[ -t 0 ]] || return 1
+        done
+        while true; do
+            printf 'Note [optional]: ' >&2
+            read -r desc || return 1
+            desc=$(trim_field "$desc")
+            if validate_field Note "$desc"; then break; fi
+            [[ -t 0 ]] || return 1
+        done
+        while true; do
+            tty_state=''
+            if [[ -t 0 ]]; then
+                tty_state=$(stty -g)
+                printf -v restore_terminal 'stty %q' "$tty_state"
+                trap "$restore_terminal" EXIT
+                trap "$restore_terminal; exit 130" INT
+                trap "$restore_terminal; exit 143" TERM
+                # Hide input before the prompt, even when a password is pasted immediately.
+                stty -echo
+            fi
+            printf 'Save password in config [blank to let SSH handle login]: ' >&2
+            if IFS= read -r pass; then password_status=0; else password_status=$?; fi
+            if [[ -n "$tty_state" ]]; then
+                stty "$tty_state"
+                trap - EXIT INT TERM
+            fi
+            printf '\n' >&2
+            [[ "$password_status" -eq 0 ]] || return "$password_status"
+            if validate_field Password "$pass"; then
+                if [[ "$pass" == "$(trim_field "$pass")" ]]; then break; fi
+                printf '[x] saved passwords cannot start or end with whitespace; leave blank to enter the password in SSH\n' >&2
+            fi
+            [[ -t 0 ]] || return 1
+        done
     fi
 
     printf -v entry '%-18s | %-20s | %-5s | %-10s | %-12s | %s' \
@@ -595,26 +672,16 @@ cmd_rm() {
 }
 
 cmd_list() {
-    local servers
+    local servers group name host port user pass desc idx=0 rows='NAME|GROUP|USER@HOST:PORT|NOTE' row
     servers=$(parse_servers) || return 1
-    [[ -z "$servers" ]] && echo -e "${YELLOW}[warn] no servers configured${NC}" && return 0
-
-    local current_group="" idx=0
+    [[ -n "$servers" ]] || { printf 'No servers configured; run: %s add\n' "$PRIMARY_CMD"; return 0; }
     while IFS='|' read -r group name host port user pass desc; do
-        if [[ "$current_group" != "$group" ]]; then
-            current_group="$group"
-            echo -e "  ${PURPLE}${BOLD}[$group]${NC}"
-        fi
-
+        printf -v row '%s|[%s]|%s@%s:%s|%s' "$name" "$group" "$user" "$host" "$port" "$desc"
+        rows+=$'\n'"$row"
         idx=$((idx + 1))
-        local auth="ssh"
-        [[ -n "$pass" ]] && auth="pwd"
-        printf "    ${GREEN}%-18s${NC} ${DIM}%-16s :%-5s %-8s${NC} %-4s %s\n" \
-            "$name" "$host" "$port" "$user" "$auth" "$desc"
     done <<< "$servers"
-
-    echo ""
-    echo -e "  ${DIM}${idx} server(s)${NC}"
+    printf '%s\n' "$rows" | format_table
+    printf '\n%s server(s)\n' "$idx"
 }
 
 cmd_edit() {
@@ -624,28 +691,44 @@ cmd_edit() {
 }
 
 setup_ssh_key() {
-    local host="$1" port="$2" user="$3" pass="${4:-}"
+    local host="$1" port="$2" user="$3" pass="${4:-}" status
     local key_file="$HOME/.ssh/id_rsa.pub"
+    if ! command -v ssh-copy-id >/dev/null 2>&1; then
+        fail "ssh-copy-id is not installed; install it and run ${PRIMARY_CMD} key again"
+        return 1
+    fi
 
     if [[ ! -f "$key_file" ]]; then
         if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
             key_file="$HOME/.ssh/id_ed25519.pub"
         else
-            echo -e "${YELLOW}[init] no SSH public key found, generating ed25519...${NC}"
-            ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N "" -C "nook@$(hostname)"
-            key_file="$HOME/.ssh/id_ed25519.pub"
+            printf '[init] No SSH public key found; generating ed25519...\n'
+            if ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N "" -C "nook@$(hostname)"; then
+                key_file="$HOME/.ssh/id_ed25519.pub"
+            else
+                status=$?
+                printf '[x] Key generation failed (exit %s); resolve the error above and retry.\n' "$status" >&2
+                return "$status"
+            fi
         fi
     fi
 
-    echo -e "${DIM}[key] pushing ${key_file} to ${user}@${host}:${port}${NC}"
+    printf '[key] Installing %s on %s@%s:%s\n' "$key_file" "$user" "$host" "$port"
+    local -a key_command=(ssh-copy-id -i "$key_file" -p "$port")
     if [[ -n "$pass" ]] && command -v sshpass >/dev/null 2>&1; then
-        sshpass -p "$pass" ssh-copy-id -o StrictHostKeyChecking=accept-new -i "$key_file" -p "$port" "${user}@${host}" 2>/dev/null && \
-            echo -e "${GREEN}[ok]${NC} SSH key login configured" || \
-            echo -e "${RED}[x] key setup failed, verify connection or password${NC}"
+        key_command=(sshpass -p "$pass" "${key_command[@]}" -o StrictHostKeyChecking=accept-new)
+    elif [[ -n "$pass" ]]; then
+        printf '[info] sshpass is not installed; enter the password when SSH asks.\n' >&2
+    fi
+    key_command+=("${user}@${host}")
+    if "${key_command[@]}"; then
+        printf '[ok] SSH key login configured\n'
     else
-        ssh-copy-id -i "$key_file" -p "$port" "${user}@${host}" 2>/dev/null && \
-            echo -e "${GREEN}[ok]${NC} SSH key login configured" || \
-            echo -e "${RED}[x] key setup failed, verify connection or complete it manually${NC}"
+        status=$?
+        printf '[x] Key setup failed (exit %s). The SSH error is shown above.\n' "$status" >&2
+        printf 'Check login with: ' >&2
+        print_ssh_command "$host" "$port" "$user" >&2
+        return "$status"
     fi
 }
 
@@ -664,21 +747,25 @@ cmd_key() {
 }
 
 cmd_ping() {
-    local servers
+    local servers group name host port user pass desc detail status=0
     servers=$(parse_servers) || return 1
-    [[ -z "$servers" ]] && echo -e "${YELLOW}[warn] no servers configured${NC}" && return 0
-
-    echo -e "${BOLD}Reachability${NC}"
-    echo ""
-
+    [[ -n "$servers" ]] || { printf 'No servers configured; run: %s add\n' "$PRIMARY_CMD"; return 0; }
+    if ! command -v nc >/dev/null 2>&1; then
+        fail "nc is not installed; install netcat and run ${PRIMARY_CMD} ping again"
+        return 1
+    fi
+    printf 'Direct TCP checks of configured SSH ports; SSH login is not tested.\n\n'
     while IFS='|' read -r group name host port user pass desc; do
-        printf "  %-18s %-16s " "$name" "$host"
-        if nc -z -w 3 "$host" "$port" 2>/dev/null; then
-            echo -e "${GREEN}[ok] online${NC}"
+        printf '%s [%s] %s:%s  ' "$name" "$group" "$host" "$port"
+        if detail=$(nc -z -w 3 "$host" "$port" 2>&1); then
+            printf '[ok] SSH port reachable\n'
         else
-            echo -e "${RED}[x] offline${NC}"
+            printf '[x] SSH port not reachable\n'
+            [[ -z "$detail" ]] || printf '    %s\n' "$detail" >&2
+            status=1
         fi
     done <<< "$servers"
+    return "$status"
 }
 
 cmd_doctor() {

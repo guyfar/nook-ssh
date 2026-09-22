@@ -8,12 +8,17 @@ The format loosely follows Keep a Changelog.
 
 ### Added
 
+- Aligned name, group, and full connection-target columns, plus a scrollable preview with the equivalent manual SSH command.
+- Interactive correction of individual add fields without discarding valid inputs; piped input continues to fail immediately on invalid data.
 - Two-step server creation from an SSH address or command, with optional fields under `nk add --advanced`.
 - Direct connection for an exact, unique server name and first-run guidance into the add flow.
 - Isolated behavior tests for selection, authentication arguments, input validation, and existing configs.
 
 ### Fixed
 
+- Key setup preserves underlying errors and failure exit codes, with a command for checking login.
+- Port checks report direct TCP reachability rather than server online/offline status, including missing dependencies and failure exit codes.
+- Saved-password prompts disable terminal echo before appearing and restore it after input or cancellation.
 - Empty passwords no longer shift picker fields or pass the `key` label as a password.
 - The numbered fallback displays its choices without mixing screen output with connection data.
 - Notes are searchable, picker errors are visible, and cancellation exits cleanly.

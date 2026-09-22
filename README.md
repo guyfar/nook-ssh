@@ -23,11 +23,14 @@ nk add 'ssh ubuntu@example.com -p 2222'
 
 Supported input: `[user@]host`, IPv6, and the `-p` and `-l` options. Other SSH options and remote commands are rejected explicitly. Pasted input is never evaluated as a shell command.
 
+In a terminal, an invalid address, port, or name prompts you to correct that field while keeping the other inputs. Piped input fails immediately on errors rather than consuming later values as corrections.
+
 ## Everyday use
 
 - `nk`: search names, hosts, usernames, groups, or notes. Recently used servers appear first.
 - `nk <name>`: connect immediately when the name matches exactly one entry; otherwise open the picker.
 - In the picker: **Enter** to connect, **Tab** to toggle details, **Esc** to cancel.
+- Columns show the name, group, full `user@host:port`, and note. Details include the complete note and a manual SSH command; use **Alt+Up/Down** to scroll.
 - Without `fzf`, choose a numbered entry or press Enter to cancel.
 - Running `nk` in a terminal with an empty catalog starts the add flow.
 
@@ -54,6 +57,10 @@ Saved passwords are stored as plain text in the local config, with file permissi
 | `nk version` | Show version |
 | `nk help` | Show help |
 
+`nk ping` checks direct TCP reachability from this machine to the configured addresses and ports. It does not verify SSH login or use SSH jump hosts or proxies. Missing `nc` is reported explicitly, and any unreachable port results in a nonzero exit status.
+
+When `nk key` fails, Nook preserves the original SSH error and exit status and shows a command for checking login.
+
 ## Configuration
 
 The default file is `~/.config/nook/servers.conf`. `XDG_CONFIG_HOME` is supported, or set an explicit directory:
@@ -78,6 +85,7 @@ An existing `~/.ssh-manager/` catalog is migrated automatically unless `NOOK_CON
 
 - Bash 3.2+, OpenSSH, and common Unix utilities.
 - `fzf`: optional, for interactive search.
+- `column`: optional, for aligned columns including CJK names. Selection and connection still work without it.
 - `sshpass`: optional, for automatically filling saved passwords.
 - `ssh-copy-id`: only for key setup; `nc`: only for reachability checks.
 
