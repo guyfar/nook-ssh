@@ -29,8 +29,11 @@ In a terminal, an invalid address, port, or name prompts you to correct that fie
 
 - `nk`: search names, hosts, usernames, groups, or notes. Recently used servers appear first.
 - `nk <name>`: connect immediately when the name matches exactly one entry; otherwise open the picker.
-- In the picker: **Enter** to connect, **Tab** to toggle details, **Esc** to cancel.
-- Columns show the name, group, full `user@host:port`, and note. Details include the complete note and a manual SSH command; use **Alt+Up/Down** to scroll.
+- In the picker, actions run on the highlighted server: **Enter** connect, **ctrl-k** configure key login, **ctrl-p** check reachability, **ctrl-y** copy the SSH command, **ctrl-e** show full details, **ctrl-d** remove, **Tab** preview, **ctrl-r** refresh status, **Esc** cancel.
+- Actions keep you in the picker: details appear in the preview pane, and pings or removals refresh the list in place. The action bar adapts to the terminal width.
+- Columns show the name, group, full `user@host:port`, note, how long ago it was last used, and reachability. Details add login method, status, and a manual SSH command; use **Alt+Up/Down** to scroll.
+- Status comes from the last `nk ping` and is never checked on startup, so the picker stays fast. A trailing `*` means the reading is over an hour old. Press **ctrl-r** in the picker, or run `nk ping`, to refresh it.
+- When a connection fails in a terminal, Nook offers a small menu (`p` ping, `k` key login, `e` edit, `c` copy command) instead of exiting silently.
 - Without `fzf`, choose a numbered entry or press Enter to cancel.
 - Running `nk` in a terminal with an empty catalog starts the add flow.
 
@@ -48,7 +51,7 @@ Saved passwords are stored as plain text in the local config, with file permissi
 
 | Command | Description |
 |---------|-------------|
-| `nk list` | List servers |
+| `nk list` | List servers with last used and status |
 | `nk rm` | Choose and confirm removal of a server |
 | `nk edit` | Edit the config with `$EDITOR`, defaulting to Vim |
 | `nk key` | Choose a server and configure SSH key login |
@@ -57,7 +60,7 @@ Saved passwords are stored as plain text in the local config, with file permissi
 | `nk version` | Show version |
 | `nk help` | Show help |
 
-`nk ping` checks direct TCP reachability from this machine to the configured addresses and ports. It does not verify SSH login or use SSH jump hosts or proxies. Missing `nc` is reported explicitly, and any unreachable port results in a nonzero exit status.
+`nk ping` checks direct TCP reachability from this machine to the configured addresses and ports. It does not verify SSH login or use SSH jump hosts or proxies. Missing `nc` is reported explicitly, and any unreachable port results in a nonzero exit status. Results are cached and shown in the picker and `nk list` until the next check.
 
 When `nk key` fails, Nook preserves the original SSH error and exit status and shows a command for checking login.
 

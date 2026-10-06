@@ -8,7 +8,7 @@ set -euo pipefail
 
 BRAND_NAME="Nook"
 PRIMARY_CMD="nk"
-VERSION="1.1.0"
+VERSION="1.3.1"
 SSH_OPTIONS=(
     -o ConnectTimeout=10
     -o ServerAliveInterval=60
@@ -20,6 +20,7 @@ XDG_CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}"
 CONFIG_DIR="${NOOK_CONFIG_DIR:-$XDG_CONFIG_ROOT/nook}"
 CONFIG_FILE="$CONFIG_DIR/servers.conf"
 HISTORY_FILE="$CONFIG_DIR/.history"
+STATUS_FILE="$CONFIG_DIR/.status"
 
 LEGACY_CONFIG_DIR="$HOME/.ssh-manager"
 LEGACY_CONFIG_FILE="$LEGACY_CONFIG_DIR/servers.conf"
@@ -33,6 +34,74 @@ PURPLE='\033[0;35m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
+
+# Semantic palette (Tokyo Night). Opt out with NO_COLOR=1 or NOOK_NO_COLOR=1.
+# Sentinel bytes wrap table cells so column(1) can align display widths first,
+# then we swap the sentinels for colours. This keeps CJK columns aligned.
+S_NAME=$'\001'
+S_GROUP=$'\002'
+S_TARGET=$'\003'
+S_NOTE=$'\004'
+S_END=$'\005'
+S_HEAD=$'\006'
+S_ON=$'\034'
+S_OFF=$'\035'
+S_STALE=$'\036'
+S_UNK=$'\037'
+
+UI_NAME=''
+UI_GROUP=''
+UI_TARGET=''
+UI_NOTE=''
+UI_HEADER=''
+UI_LABEL=''
+UI_ON=''
+UI_OFF=''
+UI_STALE=''
+UI_RESET=''
+
+set_palette() {
+    # auto: colour when stdout is a terminal. picker: colour when either end is a
+    # terminal, since a pipe into fzf must still carry ANSI. force: always.
+    local mode="${1:-auto}" on=0 truecolor=0
+    if [[ -n "${NO_COLOR:-}" || "${NOOK_NO_COLOR:-0}" == 1 ]]; then
+        on=0
+    elif [[ "$mode" == force ]]; then
+        on=1
+    elif [[ "$mode" == picker ]]; then
+        { [[ -t 0 ]] || [[ -t 1 ]]; } && on=1
+    else
+        [[ -t 1 ]] && on=1
+    fi
+    UI_NAME=''; UI_GROUP=''; UI_TARGET=''; UI_NOTE=''
+    UI_HEADER=''; UI_LABEL=''; UI_ON=''; UI_OFF=''; UI_STALE=''; UI_RESET=''
+    [[ "$on" == 1 ]] || return 0
+    if [[ "${COLORTERM:-}" == *truecolor* || "${COLORTERM:-}" == *24bit* || "${TERM:-}" == *truecolor* ]]; then
+        truecolor=1
+    fi
+    if [[ "$truecolor" == 1 ]]; then
+        UI_NAME=$'\033[1;38;2;125;207;255m'
+        UI_GROUP=$'\033[38;2;187;154;247m'
+        UI_TARGET=$'\033[38;2;154;165;206m'
+        UI_NOTE=$'\033[38;2;115;125;160m'
+        UI_HEADER=$'\033[38;2;86;95;137m'
+        UI_LABEL=$'\033[38;2;86;95;137m'
+        UI_ON=$'\033[38;2;158;206;106m'
+        UI_OFF=$'\033[38;2;247;118;142m'
+        UI_STALE=$'\033[38;2;224;175;104m'
+    else
+        UI_NAME=$'\033[1;36m'
+        UI_GROUP=$'\033[0;35m'
+        UI_TARGET=$'\033[2m'
+        UI_NOTE=$'\033[2m'
+        UI_HEADER=$'\033[2m'
+        UI_LABEL=$'\033[2m'
+        UI_ON=$'\033[0;32m'
+        UI_OFF=$'\033[0;31m'
+        UI_STALE=$'\033[0;33m'
+    fi
+    UI_RESET=$'\033[0m'
+}
 
 print_logo() {
     echo -e "${CYAN}${BOLD}"
@@ -137,35 +206,48 @@ init() {
     fi
 
     touch "$HISTORY_FILE"
-    chmod 600 "$CONFIG_FILE" "$HISTORY_FILE"
+    [[ -f "$STATUS_FILE" ]] || touch "$STATUS_FILE"
+    chmod 600 "$CONFIG_FILE" "$HISTORY_FILE" "$STATUS_FILE"
 }
 
 show_help() {
+    set_palette auto
+    local c="$UI_NAME" g="$UI_GROUP" t="$UI_TARGET" l="$UI_LABEL" r="$UI_RESET" b=$'\033[1m'
     print_logo
     echo ""
-    echo -e "${BOLD}${BRAND_NAME} v${VERSION}${NC}"
+    echo -e "${b}${BRAND_NAME} v${VERSION}${r}"
     echo ""
-    echo -e "${BOLD}Usage${NC}"
-    echo -e "  ${GREEN}${PRIMARY_CMD}${NC}              Open the server picker"
-    echo -e "  ${GREEN}${PRIMARY_CMD} add [address]${NC}  Add a server in two steps"
-    echo -e "  ${GREEN}${PRIMARY_CMD} add --advanced${NC} Optional group, note, saved password"
-    echo -e "  ${GREEN}${PRIMARY_CMD} rm${NC}           Remove a server"
-    echo -e "  ${GREEN}${PRIMARY_CMD} list${NC}         List all servers"
-    echo -e "  ${GREEN}${PRIMARY_CMD} edit${NC}         Edit the config file"
-    echo -e "  ${GREEN}${PRIMARY_CMD} key${NC}          Configure SSH key login"
-    echo -e "  ${GREEN}${PRIMARY_CMD} ping${NC}         Check server reachability"
-    echo -e "  ${GREEN}${PRIMARY_CMD} doctor${NC}       Show environment diagnostics"
-    echo -e "  ${GREEN}${PRIMARY_CMD} <name>${NC}       Connect to an exact, unique name"
-    echo -e "  ${GREEN}${PRIMARY_CMD} <keyword>${NC}    Search and choose a server"
-    echo -e "  ${GREEN}${PRIMARY_CMD} version${NC}      Show version"
-    echo -e "  ${GREEN}${PRIMARY_CMD} help${NC}         Show this help"
+    echo -e "${b}Usage${r}"    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD}" "$r" 'Open the server picker'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} add [address]" "$r" 'Add a server in two steps'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} add --advanced" "$r" 'Optional group, note, saved password'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} <name>" "$r" 'Connect to an exact, unique name'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} <keyword>" "$r" 'Search and choose a server'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} list" "$r" 'List servers with last used and status'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} ping" "$r" 'Check reachability and refresh status'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} rm" "$r" 'Remove a server'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} edit" "$r" 'Edit the config file'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} key" "$r" 'Configure SSH key login'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} doctor" "$r" 'Show environment diagnostics'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} version" "$r" 'Show version'
+    printf '  %s%-22s%s %s\n' "$c" "${PRIMARY_CMD} help" "$r" 'Show this help'
     echo ""
-    echo -e "${BOLD}Examples${NC}"
-    echo "  ${PRIMARY_CMD} add ubuntu@example.com"
-    echo "  ${PRIMARY_CMD} add 'ssh ubuntu@example.com -p 2222'"
+    echo -e "${b}In the picker${r}"
+    printf '  %s%-22s%s %s\n' "$l" 'Enter' "$r" 'connect to the highlighted server'
+    printf '  %s%-22s%s %s\n' "$l" 'ctrl-k' "$r" 'install this key as SSH key login'
+    printf '  %s%-22s%s %s\n' "$l" 'ctrl-p' "$r" 'check reachability of this server'
+    printf '  %s%-22s%s %s\n' "$l" 'ctrl-y' "$r" 'copy the SSH command'
+    printf '  %s%-22s%s %s\n' "$l" 'ctrl-e' "$r" 'show full details'
+    printf '  %s%-22s%s %s\n' "$l" 'ctrl-d' "$r" 'remove this server'
+    printf '  %s%-22s%s %s\n' "$l" 'Tab' "$r" 'toggle the details pane'
+    printf '  %s%-22s%s %s\n' "$l" 'ctrl-r' "$r" 're-check all reachability and reload'
+    printf '  %s%-22s%s %s\n' "$l" 'Esc' "$r" 'cancel'
     echo ""
-    echo -e "${BOLD}Config${NC}"
-    echo -e "  ${CONFIG_FILE}"
+    echo -e "${b}Examples${r}"
+    printf '  %s\n' "${PRIMARY_CMD} add ubuntu@example.com"
+    printf '  %s\n' "${PRIMARY_CMD} add 'ssh ubuntu@example.com -p 2222'"
+    echo ""
+    echo -e "${b}Config${r}"
+    printf '  %s\n' "$CONFIG_FILE"
 }
 
 parse_servers() {
@@ -215,26 +297,112 @@ count_servers() {
     fi
 }
 
+now_epoch() {
+    printf '%s\n' "${EPOCHSECONDS:-$(date +%s)}"
+}
+
+humanize_time() {
+    # Render an age in seconds as a compact label, e.g. 45s / 12m / 3h / 2d.
+    local seconds="${1:-0}"
+    [[ "$seconds" =~ ^[0-9]+$ ]] || seconds=0
+    if (( seconds < 60 )); then printf 'now\n'
+    elif (( seconds < 3600 )); then printf '%dm\n' $((seconds / 60))
+    elif (( seconds < 86400 )); then printf '%dh\n' $((seconds / 3600))
+    else printf '%dd\n' $((seconds / 86400))
+    fi
+}
+
 record_history() {
-    local name="$1"
+    local name="$1" now
+    now=$(now_epoch)
     local tmp
     tmp=$(mktemp)
-    printf '%s\n' "$name" > "$tmp"
-    grep -Fvx -- "$name" "$HISTORY_FILE" >> "$tmp" || [[ $? -eq 1 ]]
+    printf '%s\t%s\n' "$name" "$now" > "$tmp"
+    # Preserve existing entries (name + optional timestamp) apart from this one.
+    awk -F'\t' -v name="$name" 'NF && $1 != name' "$HISTORY_FILE" >> "$tmp" 2>/dev/null || true
     head -20 "$tmp" > "$HISTORY_FILE"
     rm -f "$tmp"
 }
 
 get_history_rank() {
-    local name="$1" item rank=0
-    while IFS= read -r item; do
+    # Ranks also carry the stored epoch (blank for legacy history files).
+    local name="$1" line rank=0
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
         rank=$((rank + 1))
-        if [[ "$item" == "$name" ]]; then
-            printf '%s\n' "$rank"
+        if [[ "${line%%$'\t'*}" == "$name" ]]; then
+            printf '%s|%s\n' "$rank" "${line#*$'\t'}"
             return 0
         fi
     done < "$HISTORY_FILE"
-    printf '999\n'
+    printf '999|\n'
+}
+
+read_status() {
+    # Echo "state<TAB>epoch<TAB>ms" for a server, or nothing when unknown.
+    local name="$1" line
+    [[ -f "$STATUS_FILE" ]] || return 0
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        if [[ "${line%%$'\t'*}" == "$name" ]]; then
+            printf '%s\n' "${line#*$'\t'}"
+            return 0
+        fi
+    done < "$STATUS_FILE"
+}
+
+record_status() {
+    local name="$1" state="$2" ms="${3:-}" now tmp
+    now=$(now_epoch)
+    tmp=$(mktemp)
+    printf '%s\t%s\t%s\t%s\n' "$name" "$state" "$now" "$ms" > "$tmp"
+    awk -F'\t' -v name="$name" 'NF && $1 != name' "$STATUS_FILE" >> "$tmp" 2>/dev/null || true
+    mv "$tmp" "$STATUS_FILE"
+    chmod 600 "$STATUS_FILE" 2>/dev/null || true
+}
+
+history_age_label() {
+    # Relative age of the last connection for this server, or blank when unknown.
+    local name="$1" rank_info age
+    rank_info=$(get_history_rank "$name")
+    age=${rank_info#*|}
+    [[ "$age" =~ ^[0-9]+$ ]] || return 0
+    humanize_time "$(( $(now_epoch) - age ))"
+}
+
+status_label() {
+    # Compact state label for the list; '*' marks a stale reading.
+    local name="$1" raw state age now stale='' label
+    raw=$(read_status "$name") || true
+    [[ -n "$raw" ]] || { printf '%s\n' '-'; return 0; }
+    state=${raw%%$'\t'*}
+    raw=${raw#*$'\t'}
+    age=${raw%%$'\t'*}
+    now=$(now_epoch)
+    [[ "$age" =~ ^[0-9]+$ ]] || age=0
+    if (( now - age > 3600 )); then stale='*'; fi
+    if [[ "$state" == up ]]; then label='up'; else label='down'; fi
+    printf '%s%s\n' "$label" "$stale"
+}
+
+status_sentinel() {
+    # Sentinel mapped to the row's status colour during alignment.
+    case "$1" in
+        up) printf '%s' "$S_ON" ;;
+        down) printf '%s' "$S_OFF" ;;
+        up\*|down\*) printf '%s' "$S_STALE" ;;
+        *) printf '%s' "$S_UNK" ;;
+    esac
+}
+
+status_color() {
+    # Pick the palette entry for a status label (green up, red down, amber stale).
+    case "$1" in
+        up) printf '%s' "$UI_ON" ;;
+        down) printf '%s' "$UI_OFF" ;;
+        up\*|down\*) printf '%s' "$UI_STALE" ;;
+        *) printf '%s' "$UI_LABEL" ;;
+    esac
 }
 
 server_at_line() {
@@ -246,20 +414,67 @@ server_at_line() {
     '
 }
 
+server_by_name() {
+    # Resolve a name back to its full record. Used by keybind actions, which
+    # only see the visible name for non-current rows.
+    local servers="$1" wanted="$2" record group name host port user pass desc
+    while IFS= read -r record; do
+        IFS='|' read -r group name host port user pass desc <<< "$record"
+        [[ "$name" == "$wanted" ]] || continue
+        printf '%s\n' "$record"
+        return 0
+    done <<< "$servers"
+    return 1
+}
+
+copy_to_clipboard() {
+    # Reads the text to copy from stdin so it can end a pipe.
+    local text
+    text=$(cat)
+    if command -v pbcopy >/dev/null 2>&1; then printf '%s' "$text" | pbcopy
+    elif command -v wl-copy >/dev/null 2>&1; then printf '%s' "$text" | wl-copy
+    elif command -v xclip >/dev/null 2>&1; then printf '%s' "$text" | xclip -selection clipboard
+    elif command -v clip.exe >/dev/null 2>&1; then printf '%s' "$text" | clip.exe
+    else
+        fail 'no clipboard tool found (pbcopy, wl-copy, xclip, or clip.exe)'
+        return 1
+    fi
+}
+
 render_fzf_preview() {
-    local servers record group name host port user pass desc
+    local servers record
     servers=$(parse_servers) || return 1
     record=$(server_at_line "$1" "$servers") || return 1
+    render_one_card "$record"
+}
+
+render_one_card() {
+    local record="$1" group name host port user pass desc login
+    local raw status_state checked last
     IFS='|' read -r group name host port user pass desc <<< "$record"
-    printf '%s [%s]\n%s@%s:%s\n' "$name" "$group" "$user" "$host" "$port"
-    [[ -z "$desc" ]] || printf 'Note: %s\n' "$desc"
     if [[ -n "$pass" ]] && command -v sshpass >/dev/null 2>&1; then
-        printf 'Login: saved password\n'
+        login='saved password'
     elif [[ -n "$pass" ]]; then
-        printf 'Login: SSH prompt (sshpass is not installed)\n'
+        login='SSH prompt (sshpass is not installed)'
     else
-        printf 'Login: SSH (key, agent, or password prompt)\n'
+        login='SSH (key, agent, or password prompt)'
     fi
+    raw=$(read_status "$name") || true
+    if [[ -n "$raw" ]]; then
+        status_state=${raw%%$'\t'*}
+        raw=${raw#*$'\t'}
+        checked=$(humanize_time "$(( $(now_epoch) - ${raw%%$'\t'*} ))")
+    else
+        status_state='unknown'
+    fi
+    last=$(history_age_label "$name")
+    printf '%s%s%s %s[%s]%s\n' "$UI_NAME" "$name" "$UI_RESET" "$UI_GROUP" "$group" "$UI_RESET"
+    printf '%s%s@%s:%s%s\n\n' "$UI_TARGET" "$user" "$host" "$port" "$UI_RESET"
+    [[ -z "$desc" ]] || printf '%sNote:%s %s\n\n' "$UI_LABEL" "$UI_RESET" "$desc"
+    printf '%sLogin:%s %s\n' "$UI_LABEL" "$UI_RESET" "$login"
+    printf '%sStatus:%s %s\n' "$UI_LABEL" "$UI_RESET" "$status_state"
+    [[ -z "$checked" ]] || printf '%sChecked:%s %s ago\n' "$UI_LABEL" "$UI_RESET" "$checked"
+    [[ -z "$last" ]] || printf '%sLast:%s %s ago\n' "$UI_LABEL" "$UI_RESET" "$last"
     printf '\nSSH command:\n'
     print_ssh_command "$host" "$port" "$user"
 }
@@ -278,66 +493,186 @@ format_table() {
     fi
 }
 
+render_aligned_cells() {
+    # Align sentinel-wrapped cells by display width, then colour each cell.
+    # Uses only bash expansion + awk so the runtime stays on the minimal toolset.
+    local aligned line
+    if command -v column >/dev/null 2>&1; then
+        aligned=$(column -t -s'|')
+    else
+        aligned=$(awk -F'|' '{ for (i = 1; i <= NF; i++) printf "%s%s", $i, (i == NF ? ORS : "  ") }')
+    fi
+    while IFS= read -r line; do
+        line=${line//$S_NAME/$UI_NAME}
+        line=${line//$S_GROUP/$UI_GROUP}
+        line=${line//$S_TARGET/$UI_TARGET}
+        line=${line//$S_NOTE/$UI_NOTE}
+        line=${line//$S_HEAD/$UI_HEADER}
+        line=${line//$S_ON/$UI_ON}
+        line=${line//$S_OFF/$UI_OFF}
+        line=${line//$S_STALE/$UI_STALE}
+        line=${line//$S_UNK/$UI_LABEL}
+        line=${line//$S_END/$UI_RESET}
+        printf '%s\n' "$line"
+    done <<< "$aligned"
+}
+
 connect_server() {
-    local host="$1" port="$2" user="$3" name="$4" pass="${5:-}"
+    local host="$1" port="$2" user="$3" name="$4" pass="${5:-}" status=0
     record_history "$name"
     printf '%b[connect]%b %s  %s@%s:%s\n\n' "$GREEN" "$NC" "$name" "$user" "$host" "$port"
 
     if [[ -n "$pass" ]] && command -v sshpass >/dev/null 2>&1; then
-        sshpass -p "$pass" ssh "${SSH_OPTIONS[@]}" -p "$port" "${user}@${host}"
+        sshpass -p "$pass" ssh "${SSH_OPTIONS[@]}" -p "$port" "${user}@${host}" || status=$?
     else
-        ssh "${SSH_OPTIONS[@]}" -p "$port" "${user}@${host}"
+        ssh "${SSH_OPTIONS[@]}" -p "$port" "${user}@${host}" || status=$?
     fi
+
+    # On a normal exit (or a remote command's own status) do nothing extra;
+    # a failed connection in a real terminal offers next steps.
+    if (( status != 0 )) && [[ -t 0 && -t 1 ]]; then
+        offer_recovery "$host" "$port" "$user" "$name" "$status"
+    fi
+    return "$status"
 }
 
-select_with_fzf() {
-    local filter="${1:-}" action="${2:-connect}" servers
-    servers=$(parse_servers) || return 1
-    [[ -n "$servers" ]] || { fail "no servers configured; run: ${PRIMARY_CMD} add"; return 1; }
+offer_recovery() {
+    # After a failed connection, suggest the most likely fixes instead of just
+    # exiting. Never blocks non-interactive runs.
+    local host="$1" port="$2" user="$3" name="$4" status="$5" choice
+    [[ -t 0 && -t 1 ]] || return 0
+    printf '\n' >&2
+    printf '%sCould not connect (ssh exit %s).%s\n' "$UI_OFF" "$status" "$UI_RESET" >&2
+    printf '  [p] check port reachability\n' >&2
+    printf '  [k] set up SSH key login\n' >&2
+    printf '  [e] edit this server\n' >&2
+    printf '  [c] copy the SSH command\n' >&2
+    printf '  [Enter] do nothing\n' >&2
+    printf 'Choice: ' >&2
+    read -r choice || return 0
+    case "$choice" in
+        p|P) cmd_ping "$name" ;;
+        k|K) cmd_key "$name" ;;
+        e|E) cmd_edit ;;
+        c|C) print_ssh_command "$host" "$port" "$user" | copy_to_clipboard \
+                 && printf '%b[copy]%b ssh command for %s\n' "$GREEN" "$NC" "$name" >&2 ;;
+        *)   : ;;
+    esac
+}
 
-    # Only a row ID and searchable display text go through fzf, never passwords.
-    local rows="" row record group name host port user pass desc rank idx=0 marker
+build_picker_table() {
+    # Emit `row-id<TAB>coloured display` lines. fzf shows only field 2
+    # (--with-nth=2); field 1 is a hidden, never-coloured selector id that
+    # maps back to the row number in the parsed catalog.
+    local servers="$1"
+    local record group name host port user pass desc rank_info rank age marker combined table ids body
+    local agestr status idx=0
+    combined="0"$'\t'"0"$'\t'"~header"$'\t'"${S_HEAD}  NAME${S_END}|${S_HEAD}GROUP${S_END}|${S_HEAD}USER@HOST:PORT${S_END}|${S_HEAD}NOTE${S_END}|${S_HEAD}LAST${S_END}|${S_HEAD}STATUS${S_END}"$'\n'
     while IFS= read -r record; do
         idx=$((idx + 1))
         IFS='|' read -r group name host port user pass desc <<< "$record"
-        rank=$(get_history_rank "$name")
-        marker=''
-        [[ "$rank" -ge 6 ]] || marker=' •'
-        printf -v row '%s|%s|%s%s|[%s]|%s@%s:%s|%s' \
-            "$rank" "$idx" "$name" "$marker" "$group" "$user" "$host" "$port" "$desc"
-        rows+="$row"$'\n'
+        rank_info=$(get_history_rank "$name")
+        rank=${rank_info%%|*}
+        age=${rank_info#*|}
+        marker='  '
+        [[ "$rank" -ge 6 ]] || marker='• '
+        if [[ "$age" =~ ^[0-9]+$ ]]; then
+            agestr=$(humanize_time "$(( $(now_epoch) - age ))")
+        else
+            agestr=''
+        fi
+        status=$(status_label "$name")
+        combined+="${rank}"$'\t'"${idx}"$'\t'"${name}"$'\t'"${S_NAME}${marker}${name}${S_END}|${S_GROUP}[${group}]${S_END}|${S_TARGET}${user}@${host}:${port}${S_END}|${S_NOTE}${desc}${S_END}|${S_NOTE}${agestr}${S_END}|$(status_sentinel "$status")${status}${S_END}"$'\n'
     done <<< "$servers"
+    table=$(printf '%s' "$combined" | sort -t$'\t' -k1,1n -k3,3f | cut -f2,3,4)
+    ids=$(printf '%s\n' "$table" | cut -f1)
+    body=$(printf '%s\n' "$table" | cut -f3 | render_aligned_cells)
+    while IFS= read -r id <&3 && IFS= read -r line <&4; do
+        printf '%s\t%s\n' "$id" "$line"
+    done 3<<< "$ids" 4<<< "$body"
+}
 
-    local preview_cmd selected status selected_line
+select_with_fzf() {
+    local filter="${1:-}" action="${2:-connect}" servers table
+    servers=$(parse_servers) || return 1
+    [[ -n "$servers" ]] || { fail "no servers configured; run: ${PRIMARY_CMD} add"; return 1; }
+
+    set_palette picker
+    table=$(build_picker_table "$servers") || return 1
+
+    local preview_cmd selected status fzf_help term_cols=0 preview_window rows_cmd refresh_cmd
+    local ping_cmd copy_cmd key_install_cmd delete_cmd
     printf -v preview_cmd '%q __preview {1}' "$0"
-    if selected=$({
-        printf '0|NAME|GROUP|USER@HOST:PORT|NOTE\n'
-        printf '%s' "$rows" | sort -t'|' -k1,1n -k3,3f | cut -d'|' -f2-
-    } | format_table | awk '{
-        id = $1
-        sub(/^[^[:space:]]+[[:space:]]+/, "")
-        printf "%s\t%s\n", id, $0
-    }' | \
-        FZF_DEFAULT_OPTS='' FZF_DEFAULT_OPTS_FILE='' fzf \
-            --delimiter=$'\t' \
-            --with-nth=2.. \
-            --header-lines=1 \
-            --header="Enter ${action} · Tab details · Esc cancel" \
-            --prompt='Search > ' \
-            --height=~80% \
-            --layout=reverse \
-            --border=rounded \
-            --border-label=' Nook ' \
-            --query="$filter" \
-            --preview="$preview_cmd" \
-            --preview-window='down,65%,hidden,wrap' \
-            --preview-label=' Details · Alt+Up/Down scroll ' \
-            --bind='tab:toggle-preview,alt-up:preview-up,alt-down:preview-down' \
-            --pointer='>' \
-            --color='fg+:bold,hl+:bold:underline,pointer:cyan,header:dim' \
-            --tiebreak=index \
-            --no-multi); then
-        selected_line=${selected%%$'\t'*}
+    printf -v rows_cmd '%q __rows' "$0"
+    printf -v refresh_cmd '%q __ping-refresh' "$0"
+    # {1} is the highlighted row id. Silent actions keep the screen clean;
+    # ctrl-k and ctrl-d hand the terminal over (fzf `become`) because they prompt.
+    printf -v ping_cmd '%q __action-silent ping {1}' "$0"
+    printf -v copy_cmd '%q __action-silent copy {1}' "$0"
+    printf -v key_install_cmd '%q __action key {1}' "$0"
+    printf -v delete_cmd '%q __action delete {1}' "$0"
+
+    # Right-side details pane needs room; fall back to a bottom pane on narrow terminals.
+    term_cols=$(stty size 2>/dev/null | awk '{print $2}') || term_cols=0
+    [[ "$term_cols" =~ ^[0-9]+$ ]] || term_cols=${COLUMNS:-0}
+    if (( term_cols >= 100 )); then
+        preview_window='right,50%,border-left,wrap,hidden'
+    else
+        preview_window='down,60%,border-top,wrap,hidden'
+    fi
+
+    local action_header
+    if (( term_cols >= 96 )); then
+        action_header=$'   Enter connect    ctrl-k key    ctrl-p ping    ctrl-y copy    ctrl-e details    ctrl-d delete\n   Tab preview      ctrl-r refresh status      Esc cancel'
+    elif (( term_cols >= 72 )); then
+        action_header='   Enter connect  ·  ctrl-k key  ·  ctrl-p ping  ·  ctrl-e details'
+    else
+        action_header='   Enter connect  ·  Tab preview  ·  ctrl-e details'
+    fi
+
+    # Everything runs via `execute`, which returns to the picker (fzf redraws
+    # afterwards). `become` is avoided because it exits fzf entirely. Actions
+    # that prompt re-attach to the terminal themselves.
+    local binds="tab:toggle-preview,alt-up:preview-up,alt-down:preview-down"
+    binds+=",ctrl-e:change-preview($preview_cmd)+change-preview-label( DETAILS )"
+    binds+=",ctrl-p:execute-silent($ping_cmd)+reload($rows_cmd)"
+    binds+=",ctrl-y:execute-silent($copy_cmd)+change-header( copied SSH command)"
+    binds+=",ctrl-k:execute($key_install_cmd)+reload($rows_cmd)"
+    binds+=",ctrl-d:execute($delete_cmd)+reload($rows_cmd)"
+    binds+=",ctrl-r:execute-silent($refresh_cmd)+reload($rows_cmd)"
+
+    # Options that only newer fzf understands are added after a capability probe.
+    local -a fzf_args=(
+        --delimiter=$'\t'
+        --with-nth=2
+        --header-lines=1
+        --ansi
+        --layout=reverse
+        --height=~95%
+        --border=rounded
+        --pointer='▌'
+        --prompt='❯ '
+        --no-multi
+        --tiebreak=index
+        --info=inline-right
+        --preview="$preview_cmd"
+        --preview-window="$preview_window"
+        --bind="$binds"
+        --header="$action_header"
+        --query="$filter"
+        --color='fg:#c0caf5,fg+:#ffffff,hl:#7aa2f7:bold,hl+:#7aa2f7:bold,bg+:#283457,pointer:#7aa2f7,marker:#7aa2f7,prompt:#7dcfff,header:#565f89,border:#3b4261,info:#565f89,label:#7aa2f7,separator:#3b4261,scrollbar:#3b4261'
+    )
+    fzf_help=$(fzf --help </dev/null 2>/dev/null || true)
+    case "$fzf_help" in *--border-label*) fzf_args+=('--border-label= Nook ' '--border-label-pos=3') ;; esac
+    case "$fzf_help" in *--preview-label*) fzf_args+=('--preview-label= DETAILS ' '--preview-label-pos=3') ;; esac
+    case "$fzf_help" in *--highlight-line*) fzf_args+=(--highlight-line) ;; esac
+    case "$fzf_help" in *--scrollbar*) fzf_args+=(--scrollbar='▐') ;; esac
+    case "$fzf_help" in *--separator*) fzf_args+=(--separator='─') ;; esac
+
+    if selected=$(printf '%s\n' "$table" | \
+        FZF_DEFAULT_OPTS='' FZF_DEFAULT_OPTS_FILE='' fzf "${fzf_args[@]}"); then
+        selected_line="${selected%%$'\t'*}"
+        [[ -n "$selected_line" ]] || { fail 'invalid server selection'; return 1; }
         server_at_line "$selected_line" "$servers"
     else
         status=$?
@@ -348,6 +683,63 @@ select_with_fzf() {
         esac
         return 1
     fi
+}
+
+picker_action_record() {
+    # Resolve the highlighted row for a keybind action.
+    local line_id="$1" servers
+    servers=$(parse_servers) || return 1
+    server_at_line "$line_id" "$servers"
+}
+
+cmd_picker_action_silent() {
+    # Side effects only, so the picker screen is never polluted.
+    local key="$1" line_id="$2"
+    local record group name host port user pass desc
+    record=$(picker_action_record "$line_id") || return 1
+    IFS='|' read -r group name host port user pass desc <<< "$record"
+    case "$key" in
+        ping) cmd_ping "$name" >/dev/null 2>&1 ;;
+        copy) print_ssh_command "$host" "$port" "$user" | copy_to_clipboard ;;
+        *)    fail "unknown silent action '$key'" ;;
+    esac
+}
+
+cmd_picker_action() {
+    # Handoff actions run after fzf releases the terminal (fzf's `become`).
+    # fzf may leave stdin non-blocking, so this re-attaches to the controlling
+    # terminal before prompting; otherwise `read` fails with EAGAIN.
+    local key="$1" line_id="$2"
+    local record group name host port user pass desc choice status
+    record=$(picker_action_record "$line_id") || { fail 'invalid server selection'; return 1; }
+    IFS='|' read -r group name host port user pass desc <<< "$record"
+    if [[ -e /dev/tty ]]; then
+        exec </dev/tty >/dev/tty 2>&1 || true
+        stty sane 2>/dev/null || true
+    fi
+    case "$key" in
+        key)
+            printf '%b[key]%b install SSH key for %s\n\n' "$GREEN" "$NC" "$name"
+            setup_ssh_key "$host" "$port" "$user" "$pass"
+            status=$?
+            printf '\nPress Enter to return to Nook... '
+            read -r choice || true
+            return "$status"
+            ;;
+        delete)
+            printf 'Remove %s (%s)? [y/N]: ' "$name" "$host"
+            read -r choice || choice=''
+            if [[ "$choice" =~ ^[yY]$ ]]; then
+                delete_entry_from_config "$record"
+                printf '%b[ok]%b removed %s\n' "$GREEN" "$NC" "$name"
+            else
+                printf 'cancelled\n'
+            fi
+            ;;
+        *)
+            fail "unknown handoff action '$key'"
+            ;;
+    esac
 }
 
 select_fallback() {
@@ -543,7 +935,7 @@ validate_new_name() {
     local name="$1" servers="$2" existing_group existing_name record
     validate_name "$name" || return 1
     case "$name" in
-        add|rm|remove|del|delete|list|ls|l|edit|key|keys|ping|check|doctor|diag|debug|help|--help|-h|version|--version|-v|__preview)
+        add|rm|remove|del|delete|list|ls|l|edit|key|keys|ping|check|doctor|diag|debug|help|--help|-h|version|--version|-v|__preview|__rows|__action|__action-silent|__ping-refresh)
             fail "'${name}' is a command name; choose a different server name"
             return 1
             ;;
@@ -654,8 +1046,11 @@ cmd_add() {
 }
 
 cmd_rm() {
-    local result status group name host port user pass desc confirm
-    if result=$(select_server '' remove); then
+    local servers result status group name host port user pass desc confirm
+    servers=$(parse_servers) || return 1
+    if [[ -n "${1:-}" ]]; then
+        result=$(server_by_name "$servers" "$1") || { fail "no server named '$1'"; return 1; }
+    elif result=$(select_server '' remove); then
         :
     else
         status=$?
@@ -672,16 +1067,25 @@ cmd_rm() {
 }
 
 cmd_list() {
-    local servers group name host port user pass desc idx=0 rows='NAME|GROUP|USER@HOST:PORT|NOTE' row
+    local servers group name host port user pass desc table
     servers=$(parse_servers) || return 1
     [[ -n "$servers" ]] || { printf 'No servers configured; run: %s add\n' "$PRIMARY_CMD"; return 0; }
-    while IFS='|' read -r group name host port user pass desc; do
-        printf -v row '%s|[%s]|%s@%s:%s|%s' "$name" "$group" "$user" "$host" "$port" "$desc"
-        rows+=$'\n'"$row"
-        idx=$((idx + 1))
-    done <<< "$servers"
-    printf '%s\n' "$rows" | format_table
-    printf '\n%s server(s)\n' "$idx"
+    set_palette auto
+    table=$({
+        printf '%sNAME%s|%sGROUP%s|%sUSER@HOST:PORT%s|%sNOTE%s|%sLAST%s|%sSTATUS%s\n' \
+            "$S_HEAD" "$S_END" "$S_HEAD" "$S_END" "$S_HEAD" "$S_END" "$S_HEAD" "$S_END" "$S_HEAD" "$S_END" "$S_HEAD" "$S_END"
+        while IFS='|' read -r group name host port user pass desc; do
+            printf '%s%s%s|%s[%s]%s|%s%s@%s:%s%s|%s%s%s|%s%s%s|%s%s%s\n' \
+                "$S_NAME" "$name" "$S_END" \
+                "$S_GROUP" "$group" "$S_END" \
+                "$S_TARGET" "$user" "$host" "$port" "$S_END" \
+                "$S_NOTE" "$desc" "$S_END" \
+                "$S_NOTE" "$(history_age_label "$name")" "$S_END" \
+                "$(status_sentinel "$(status_label "$name")")" "$(status_label "$name")" "$S_END"
+        done <<< "$servers"
+    } | render_aligned_cells)
+    printf '%s\n' "$table"
+    printf '\n%s server(s)\n' "$(printf '%s\n' "$servers" | awk 'END { print NR }')"
 }
 
 cmd_edit() {
@@ -733,91 +1137,153 @@ setup_ssh_key() {
 }
 
 cmd_key() {
-    local result status group name host port user pass desc
-    printf 'Configure SSH key login\n'
-    if result=$(select_server '' select); then
-        :
+    local servers result status group name host port user pass desc
+    servers=$(parse_servers) || return 1
+    if [[ -n "${1:-}" ]]; then
+        result=$(server_by_name "$servers" "$1") || { fail "no server named '$1'"; return 1; }
     else
-        status=$?
-        [[ "$status" -ne 130 ]] || return 0
-        return "$status"
+        printf 'Configure SSH key login\n'
+        if result=$(select_server '' select); then
+            :
+        else
+            status=$?
+            [[ "$status" -ne 130 ]] || return 0
+            return "$status"
+        fi
     fi
     IFS='|' read -r group name host port user pass desc <<< "$result"
     setup_ssh_key "$host" "$port" "$user" "$pass"
 }
 
 cmd_ping() {
+    # Reachability, not SSH login: writes the cache the picker reads.
     local servers group name host port user pass desc detail status=0
     servers=$(parse_servers) || return 1
-    [[ -n "$servers" ]] || { printf 'No servers configured; run: %s add\n' "$PRIMARY_CMD"; return 0; }
+    [[ -n "$servers" ]] || { printf 'No servers configured; run %s add\n' "$PRIMARY_CMD"; return 0; }
     if ! command -v nc >/dev/null 2>&1; then
         fail "nc is not installed; install netcat and run ${PRIMARY_CMD} ping again"
         return 1
     fi
-    printf 'Direct TCP checks of configured SSH ports; SSH login is not tested.\n\n'
+    printf 'Direct TCP checks of configured SSH ports; SSH login is not tested.\n'
+    printf 'Results are cached for the picker status column.\n\n'
     while IFS='|' read -r group name host port user pass desc; do
+        if [[ -n "${1:-}" && "$name" != "$1" ]]; then
+            continue
+        fi
         printf '%s [%s] %s:%s  ' "$name" "$group" "$host" "$port"
         if detail=$(nc -z -w 3 "$host" "$port" 2>&1); then
+            record_status "$name" up ''
             printf '[ok] SSH port reachable\n'
         else
+            record_status "$name" down ''
             printf '[x] SSH port not reachable\n'
             [[ -z "$detail" ]] || printf '    %s\n' "$detail" >&2
             status=1
         fi
     done <<< "$servers"
+    printf '\nRefresh the picker with ctrl-r.\n'
     return "$status"
 }
 
+cmd_ping_refresh() {
+    # Quiet refresh used by the picker's ctrl-r binding.
+    local servers group name host port user pass desc
+    servers=$(parse_servers) || return 1
+    command -v nc >/dev/null 2>&1 || { printf 'nc is not installed\n' >&2; return 1; }
+    while IFS='|' read -r group name host port user pass desc; do
+        if nc -z -w 2 "$host" "$port" >/dev/null 2>&1; then
+            record_status "$name" up ''
+        else
+            record_status "$name" down ''
+        fi
+    done <<< "$servers"
+    printf 'Status refreshed\n' >&2
+}
+
 cmd_doctor() {
-    local server_count
+    local server_count nc_state sshpass_state color_state
     server_count=$(count_servers) || return 1
+    command -v nc >/dev/null 2>&1 && nc_state='installed' || nc_state='not installed'
+    command -v sshpass >/dev/null 2>&1 && sshpass_state='installed' || sshpass_state='not installed'
+    if [[ -n "${NO_COLOR:-}" || "${NOOK_NO_COLOR:-0}" == 1 ]]; then
+        color_state='disabled'
+    elif [[ "${COLORTERM:-}" == *truecolor* || "${COLORTERM:-}" == *24bit* || "${TERM:-}" == *truecolor* ]]; then
+        color_state='truecolor'
+    else
+        color_state='256 / basic'
+    fi
+    set_palette auto
 
-    echo -e "${BOLD}Diagnostics${NC}"
-    echo ""
+    printf '%s%s%s\n\n' "$UI_NAME" "Diagnostics" "$UI_RESET"
 
-    printf "  %-18s %s\n" "Version" "${BRAND_NAME} ${VERSION}"
-    printf "  %-18s %s\n" "Primary command" "${PRIMARY_CMD}"
-    printf "  %-18s %s\n" "Config dir" "${CONFIG_DIR}"
-    printf "  %-18s %s\n" "Config file" "${CONFIG_FILE}"
-    printf "  %-18s %s\n" "History file" "${HISTORY_FILE}"
-    printf "  %-18s %s\n" "Servers" "${server_count}"
-    printf "  %-18s %s\n" "Shell" "${SHELL:-unknown}"
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "Version" "$UI_RESET" "${BRAND_NAME} ${VERSION}"
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "Primary command" "$UI_RESET" "${PRIMARY_CMD}"
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "Config dir" "$UI_RESET" "${CONFIG_DIR}"
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "Config file" "$UI_RESET" "${CONFIG_FILE}"
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "History file" "$UI_RESET" "${HISTORY_FILE}"
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "Status cache" "$UI_RESET" "${STATUS_FILE}"
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "Servers" "$UI_RESET" "${server_count}"
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "Colour" "$UI_RESET" "${color_state}"
 
     if command -v bash >/dev/null 2>&1; then
-        printf "  %-18s %s\n" "Bash" "$(bash --version | head -1)"
+        printf '  %s%-18s%s %s\n' "$UI_LABEL" "Bash" "$UI_RESET" "$(bash --version | head -1)"
     else
-        printf "  %-18s %s\n" "Bash" "not found"
+        printf '  %s%-18s%s %s\n' "$UI_LABEL" "Bash" "$UI_RESET" "not found"
     fi
 
     if command -v ssh >/dev/null 2>&1; then
-        printf "  %-18s %s\n" "SSH" "$(ssh -V 2>&1)"
+        printf '  %s%-18s%s %s\n' "$UI_LABEL" "SSH" "$UI_RESET" "$(ssh -V 2>&1)"
     else
-        printf "  %-18s %s\n" "SSH" "not found"
+        printf '  %s%-18s%s %s\n' "$UI_LABEL" "SSH" "$UI_RESET" "not found"
     fi
 
     if command -v fzf >/dev/null 2>&1; then
-        printf "  %-18s %s\n" "fzf" "$(fzf --version 2>/dev/null | head -1)"
+        printf '  %s%-18s%s %s\n' "$UI_LABEL" "fzf" "$UI_RESET" "$(fzf --version </dev/null 2>/dev/null | head -1)"
     else
-        printf "  %-18s %s\n" "fzf" "not installed"
+        printf '  %s%-18s%s %s\n' "$UI_LABEL" "fzf" "$UI_RESET" "not installed"
     fi
 
-    if command -v sshpass >/dev/null 2>&1; then
-        printf "  %-18s %s\n" "sshpass" "installed"
-    else
-        printf "  %-18s %s\n" "sshpass" "not installed"
-    fi
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "sshpass" "$UI_RESET" "${sshpass_state}"
+    printf '  %s%-18s%s %s\n' "$UI_LABEL" "nc (status)" "$UI_RESET" "${nc_state}"
 
     if [[ -f "$CONFIG_FILE" ]]; then
-        printf "  %-18s %s\n" "Config status" "present"
+        printf '  %s%-18s%s %s\n' "$UI_LABEL" "Config status" "$UI_RESET" "present"
     else
-        printf "  %-18s %s\n" "Config status" "missing"
+        printf '  %s%-18s%s %s\n' "$UI_LABEL" "Config status" "$UI_RESET" "missing"
     fi
 }
 
 main() {
     case "${1:-}" in
         __preview)
+            set_palette picker
             render_fzf_preview "${2:-}"
+            return 0
+            ;;
+        __ping-refresh)
+            init
+            cmd_ping_refresh
+            return 0
+            ;;
+        __rows)
+            # Re-emit the picker table for fzf's reload bindings.
+            init
+            set_palette picker
+            build_picker_table "$(parse_servers)"
+            return 0
+            ;;
+        __action)
+            # Handoff keybind (fzf `become`): runs after fzf releases the terminal.
+            init
+            set_palette picker
+            cmd_picker_action "${2:-}" "${3:-}"
+            return 0
+            ;;
+        __action-silent)
+            # In-place keybind (fzf `execute-silent`): side effects only.
+            init
+            set_palette picker
+            cmd_picker_action_silent "${2:-}" "${3:-}"
             return 0
             ;;
         help|--help|-h)

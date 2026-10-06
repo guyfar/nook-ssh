@@ -42,7 +42,7 @@ class NookTests(unittest.TestCase):
         self.env = dict(os.environ, NOOK_CONFIG_DIR=str(self.config),
                         NOOK_TEST_ROOT=str(self.root), PATH=str(self.bin),
                         NOOK_TEST_FZF='first')
-        for command in ('bash', 'awk', 'cat', 'chmod', 'cp', 'cut', 'dirname',
+        for command in ('bash', 'awk', 'cat', 'chmod', 'cp', 'cut', 'date', 'dirname',
                         'grep', 'head', 'hostname', 'mkdir', 'mktemp', 'mv',
                         'rm', 'sh', 'sort', 'stty', 'touch'):
             (self.bin / command).symlink_to(shutil.which(command))
@@ -97,6 +97,10 @@ if mode == 'filter':
     sys.exit(result.returncode)
 lines = data.splitlines()
 if '--header-lines=1' in sys.argv: lines = lines[1:]
+# Simulate --expect: an action key prints its name before the selected row.
+action = os.environ.get('NOOK_TEST_ACTION', '')
+if action:
+    print(action)
 print(lines[0])
 ''')
 
@@ -112,13 +116,13 @@ print(lines[0])
     def assert_ok(self, result):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def terminal_session(self, steps, columns=80, args=(), expected_status=0):
+    def terminal_session(self, steps, columns=80, args=(), expected_status=0, extra_env=None):
         """Exercise the actual terminal protocol, including fzf's cursor query."""
         child, master = pty.fork()
         if child == 0:
             fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', 24, columns, 0, 0))
             os.execve('/bin/bash', ['/bin/bash', str(SCRIPT), *args],
-                      dict(self.env, TERM='xterm-256color'))
+                      dict(self.env, TERM='xterm-256color', **(extra_env or {})))
         output = b''
         reaped = False
 
@@ -139,12 +143,16 @@ print(lines[0])
             return chunk
 
         try:
+            cursor = 0
             for expected, keys in steps:
-                received = b''
                 deadline = time.monotonic() + 5
-                while expected not in received and time.monotonic() < deadline:
-                    received += collect_output()
-                self.assertIn(expected, received, repr(output[-3000:]))
+                # Search cumulative output from a monotonic cursor so text that
+                # arrives early (fzf redraws eagerly) is never missed, while a
+                # repeated marker is still matched in order.
+                while expected not in output[cursor:] and time.monotonic() < deadline:
+                    collect_output()
+                self.assertIn(expected, output[cursor:], repr(output[-3000:]))
+                cursor = output.index(expected, cursor) + len(expected)
                 if keys:
                     os.write(master, keys)
             deadline = time.monotonic() + 5
@@ -550,6 +558,91 @@ print(lines[0])
             (b'SSH command:', b'\r'),
             (b'[connect]', b''),
         ], columns=48)
+
+    def test_history_records_timestamp_and_reads_legacy_lines(self):
+        (self.config / '.history').write_text('web-dev\n')
+        self.assert_ok(self.run_nk('web-prod'))
+        history = (self.config / '.history').read_text().splitlines()
+        self.assertEqual(history[0].split('\t')[0], 'web-prod')
+        self.assertRegex(history[0].split('\t')[1], r'^[0-9]+$')
+        # Legacy name-only lines are preserved verbatim until next connected.
+        self.assertIn('web-dev', (self.config / '.history').read_text().splitlines()[1])
+
+    def test_failed_connect_offers_recovery_only_in_a_terminal(self):
+        # Non-interactive runs must not block on the recovery prompt.
+        result = self.run_nk('web-prod', NOOK_TEST_SSH_EXIT='255')
+        self.assertEqual(result.returncode, 255)
+        self.assertNotIn('Choice:', result.stderr)
+        self.assertNotIn('Could not connect', result.stderr)
+
+    def test_failed_connect_prompts_in_a_terminal(self):
+        output = self.terminal_session([
+            (b'Could not connect', b'\r'),
+        ], args=('web-prod',), expected_status=255, extra_env={'NOOK_TEST_SSH_EXIT': '255'})
+        self.assertIn(b'[p] check port reachability', output)
+        self.assertIn(b'Choice:', output)
+
+    def test_picker_actions_stay_in_the_picker(self):
+        # Actions must not exit the picker: no --expect (which exits on each key)
+        # and no become (which replaces fzf). Everything runs via execute, with
+        # side-effect-free actions silent or preview-only.
+        self.assert_ok(self.run_nk(NOOK_TEST_FZF='cancel'))
+        args = json.loads((self.root / 'fzf-args.json').read_text())
+        self.assertFalse([a for a in args if a.startswith('--expect')])
+        binds = [a for a in args if a.startswith('--bind=')][0]
+        self.assertIn('ctrl-e:change-preview', binds)
+        self.assertIn('execute-silent', binds)
+        self.assertNotIn('become', binds)
+        for key in ('ctrl-e', 'ctrl-p', 'ctrl-y', 'ctrl-k', 'ctrl-d', 'ctrl-r'):
+            self.assertIn(key, binds)
+
+    def test_picker_action_does_not_connect(self):
+        # A keybind action must never fall through to a connection.
+        self.assert_ok(self.run_nk('__action-silent', 'ping', '1'))
+        self.assert_ok(self.run_nk('__action', 'delete', '1', input='n\n\n'))
+        self.assertEqual(self.calls(), [])
+
+    def test_picker_action_delete_removes_the_selected_server(self):
+        self.assert_ok(self.run_nk('__action', 'delete', '1', input='y\n\n'))
+        self.assertNotIn('web-prod', self.catalog.read_text())
+        self.assertIn('web-dev', self.catalog.read_text())
+        self.assertEqual(self.calls(), [])
+
+    def test_picker_shows_last_used_column(self):
+        now = int(time.time())
+        (self.config / '.history').write_text('web-prod\t%d\nweb-dev\t%d\n'
+                                              % (now - 7200, now - 3 * 86400))
+        self.assert_ok(self.run_nk(NOOK_TEST_FZF='cancel'))
+        rows = (self.root / 'fzf-input').read_text()
+        self.assertIn('2h', rows)
+        self.assertIn('3d', rows)
+
+    def test_picker_shows_status_and_stale_marker(self):
+        now = int(time.time())
+        (self.config / '.status').write_text('web-prod\tup\t%d\t\nweb-dev\tdown\t%d\t\n'
+                                             % (now, now - 90000))
+        self.assert_ok(self.run_nk(NOOK_TEST_FZF='cancel'))
+        rows = (self.root / 'fzf-input').read_text()
+        self.assertIn('up', rows)
+        self.assertIn('down*', rows)
+        self.assertNotIn('fixture-password', rows)
+
+    def test_ping_records_status_cache_for_picker(self):
+        self.assertNotEqual(self.run_nk('ping', NOOK_TEST_UNREACHABLE='192.0.2.20').returncode, 0)
+        status = (self.config / '.status').read_text()
+        self.assertIn('web-prod\tup\t', status)
+        self.assertIn('web-dev\tdown\t', status)
+        self.assertIn('ctrl-r', self.run_nk('ping').stdout)
+
+    def test_ping_refresh_updates_cache_quietly(self):
+        self.assert_ok(self.run_nk('__ping-refresh'))
+        status = (self.config / '.status').read_text()
+        self.assertIn('web-prod\tup\t', status)
+
+    def test_cancel_does_not_create_status_file(self):
+        # Status stays a cache: merely opening the picker must not write it.
+        self.assert_ok(self.run_nk(NOOK_TEST_FZF='cancel'))
+        self.assertEqual((self.config / '.status').read_text(), '')
 
 
 if __name__ == '__main__':

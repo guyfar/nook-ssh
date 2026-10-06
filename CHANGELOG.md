@@ -9,6 +9,10 @@ The format loosely follows Keep a Changelog.
 ### Added
 
 - Aligned name, group, and full connection-target columns, plus a scrollable preview with the equivalent manual SSH command.
+- A semantic, truecolor picker theme (Tokyo Night) with per-column colour, a rounded frame, a `DETAILS` side pane on wide terminals that collapses to a bottom pane on narrow ones, and colour-free fallback output for pipes or `NO_COLOR`.
+- `nk list` shares the same aligned, colour-coded table as the picker.
+- Relative "last used" times from timestamped history, plus a cached reachability column. `nk ping` writes the cache and picker `ctrl-r` refreshes it in place; stale readings are marked with `*`.
+- A picker action bar that keeps you in the picker: `ctrl-e` shows details in the preview pane, `ctrl-p` pings one server, `ctrl-y` copies the SSH command, `ctrl-k` installs key login, and `ctrl-d` removes after a confirmation, all acting on the highlighted server. The list refreshes in place and the hint line adapts to the terminal width.
 - Interactive correction of individual add fields without discarding valid inputs; piped input continues to fail immediately on invalid data.
 - Two-step server creation from an SSH address or command, with optional fields under `nk add --advanced`.
 - Direct connection for an exact, unique server name and first-run guidance into the add flow.
@@ -29,6 +33,8 @@ The format loosely follows Keep a Changelog.
 ### Changed
 
 - Simplified the picker to one list, with details hidden until Tab is pressed and only usable controls in the header.
+- The picker degrades gracefully: fzf capabilities are probed individually, and CJK columns stay aligned because cells are width-aligned before colour is applied.
+- The history file now stores `name<TAB>epoch`; legacy name-only history is still read and upgraded on the next connection.
 - Removed repeated logos from everyday commands and shortened both READMEs around common tasks.
 - Kept credentials out of picker input; selection resolves a record ID against the loaded catalog.
 - Documented and tested compatibility with macOS Bash 3.2.
