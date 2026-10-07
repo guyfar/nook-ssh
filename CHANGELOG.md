@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format loosely follows Keep a Changelog.
 
+## [1.3.2] - 2026-10-07
+
+### Fixed
+
+- `ctrl-e` now opens the details pane. It previously called `change-preview`, which only swaps the preview contents and never reveals the pane while it is hidden, so the key appeared to do nothing.
+
 ## [1.3.1] - 2026-10-07
 
 ### Added

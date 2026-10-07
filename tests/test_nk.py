@@ -590,7 +590,7 @@ print(lines[0])
         args = json.loads((self.root / 'fzf-args.json').read_text())
         self.assertFalse([a for a in args if a.startswith('--expect')])
         binds = [a for a in args if a.startswith('--bind=')][0]
-        self.assertIn('ctrl-e:change-preview', binds)
+        self.assertIn('ctrl-e:toggle-preview', binds)
         self.assertIn('execute-silent', binds)
         self.assertNotIn('become', binds)
         for key in ('ctrl-e', 'ctrl-p', 'ctrl-y', 'ctrl-k', 'ctrl-d', 'ctrl-r'):
