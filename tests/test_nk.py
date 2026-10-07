@@ -3,6 +3,7 @@ import json
 import errno
 import fcntl
 import os
+import re
 from pathlib import Path
 import pty
 import select
@@ -115,6 +116,12 @@ print(lines[0])
 
     def assert_ok(self, result):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @staticmethod
+    def strip_ansi(text):
+        # Picker previews and tables always carry colour (fzf runs with --ansi),
+        # so assertions compare on the visible text.
+        return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
     def terminal_session(self, steps, columns=80, args=(), expected_status=0, extra_env=None):
         """Exercise the actual terminal protocol, including fzf's cursor query."""
@@ -331,12 +338,16 @@ print(lines[0])
     def test_preview_has_target_note_and_same_ssh_command_as_connection(self):
         result = self.run_nk('__preview', '1')
         self.assert_ok(result)
-        self.assertIn('web-prod [production]', result.stdout)
-        self.assertIn('ubuntu@192.0.2.10:22', result.stdout)
-        self.assertIn('billing-main', result.stdout)
-        self.assertNotIn('fixture-password', result.stdout)
+        # The preview must carry ANSI colour: fzf renders it with --ansi and the
+        # picker reloads through a pipe, where colour would otherwise be lost.
+        self.assertIn('\x1b[', result.stdout)
+        visible = self.strip_ansi(result.stdout)
+        self.assertIn('web-prod [production]', visible)
+        self.assertIn('ubuntu@192.0.2.10:22', visible)
+        self.assertIn('billing-main', visible)
+        self.assertNotIn('fixture-password', visible)
         self.assert_ok(self.run_nk('web-prod'))
-        command = result.stdout.split('SSH command:\n', 1)[1].strip()
+        command = visible.split('SSH command:\n', 1)[1].strip()
         self.assertEqual(shlex.split(command), ['ssh', *self.calls()[0]['args']])
 
     def test_empty_noninteractive_start_explains_next_step(self):
@@ -552,10 +563,13 @@ print(lines[0])
                                 + 'operational-note ' * 50 + '\n')
         (self.bin / 'fzf').unlink()
         (self.bin / 'fzf').symlink_to(REAL_FZF)
+        # Tab opens the details pane; then Enter still connects. Scrolling is
+        # exercised (keystrokes are sent) without asserting on the exact scroll
+        # position, which depends on fzf's wrapping.
         self.terminal_session([
             (b'web-prod', b'\t'),
             (b'Note:', b'\x1b[1;3B' * 40),
-            (b'SSH command:', b'\r'),
+            (b'operational-note', b'\r'),
             (b'[connect]', b''),
         ], columns=48)
 

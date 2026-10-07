@@ -8,7 +8,7 @@ set -euo pipefail
 
 BRAND_NAME="Nook"
 PRIMARY_CMD="nk"
-VERSION="1.3.2"
+VERSION="1.3.3"
 SSH_OPTIONS=(
     -o ConnectTimeout=10
     -o ServerAliveInterval=60
@@ -61,15 +61,14 @@ UI_STALE=''
 UI_RESET=''
 
 set_palette() {
-    # auto: colour when stdout is a terminal. picker: colour when either end is a
-    # terminal, since a pipe into fzf must still carry ANSI. force: always.
+    # auto: colour when stdout is a terminal. picker: always colour, because
+    # these run inside fzf (--ansi) even though their stdio is a pipe; a plain
+    # pipe would otherwise lose all colour when the list is reloaded.
     local mode="${1:-auto}" on=0 truecolor=0
     if [[ -n "${NO_COLOR:-}" || "${NOOK_NO_COLOR:-0}" == 1 ]]; then
         on=0
-    elif [[ "$mode" == force ]]; then
+    elif [[ "$mode" == force || "$mode" == picker ]]; then
         on=1
-    elif [[ "$mode" == picker ]]; then
-        { [[ -t 0 ]] || [[ -t 1 ]]; } && on=1
     else
         [[ -t 1 ]] && on=1
     fi
@@ -633,7 +632,9 @@ select_with_fzf() {
     # Everything runs via `execute`, which returns to the picker (fzf redraws
     # afterwards). `become` is avoided because it exits fzf entirely. Actions
     # that prompt re-attach to the terminal themselves.
-    local binds="tab:toggle-preview,alt-up:preview-up,alt-down:preview-down"
+    # esc closes the preview first and only aborts when no pane is open, so
+    # opening details with ctrl-e/Tab is not a one-way trip.
+    local binds="tab:toggle-preview,alt-up:preview-up,alt-down:preview-down,esc:close"
     binds+=",ctrl-e:toggle-preview"
     binds+=",ctrl-p:execute-silent($ping_cmd)+reload($rows_cmd)"
     binds+=",ctrl-y:execute-silent($copy_cmd)+change-header( copied SSH command)"

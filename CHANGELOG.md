@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format loosely follows Keep a Changelog.
 
+## [1.3.3] - 2026-10-07
+
+### Fixed
+
+- `ctrl-r` no longer drains the colour from the list. Status refreshes reload the table through a pipe, where the palette previously decided it was not on a terminal and emitted plain text.
+- `Esc` closes the details pane instead of quitting the picker; press it again (or with no pane open) to cancel.
+
 ## [1.3.2] - 2026-10-07
 
 ### Fixed
