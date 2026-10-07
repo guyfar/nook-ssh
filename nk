@@ -8,7 +8,7 @@ set -euo pipefail
 
 BRAND_NAME="Nook"
 PRIMARY_CMD="nk"
-VERSION="1.3.3"
+VERSION="1.4.0"
 SSH_OPTIONS=(
     -o ConnectTimeout=10
     -o ServerAliveInterval=60
@@ -604,11 +604,12 @@ select_with_fzf() {
     printf -v preview_cmd '%q __preview {1}' "$0"
     printf -v rows_cmd '%q __rows' "$0"
     printf -v refresh_cmd '%q __ping-refresh' "$0"
-    # {1} is the highlighted row id. Silent actions keep the screen clean;
-    # ctrl-k and ctrl-d hand the terminal over (fzf `become`) because they prompt.
+    # {1} is the highlighted row id. Silent actions keep the screen clean; the
+    # prompting actions (key, edit, delete) re-attach to the terminal themselves.
     printf -v ping_cmd '%q __action-silent ping {1}' "$0"
     printf -v copy_cmd '%q __action-silent copy {1}' "$0"
     printf -v key_install_cmd '%q __action key {1}' "$0"
+    printf -v edit_cmd '%q __action edit {1}' "$0"
     printf -v delete_cmd '%q __action delete {1}' "$0"
 
     # Right-side details pane needs room; fall back to a bottom pane on narrow terminals.
@@ -621,25 +622,29 @@ select_with_fzf() {
     fi
 
     local action_header
-    if (( term_cols >= 96 )); then
-        action_header=$'   Enter connect    ctrl-p ping    ctrl-y copy    ctrl-k key login    ctrl-d delete    ctrl-r refresh\n   Tab / ctrl-e details      Esc cancel'
-    elif (( term_cols >= 72 )); then
-        action_header='   Enter connect  ·  Tab details  ·  ctrl-p ping  ·  ctrl-y copy'
+    if (( term_cols >= 100 )); then
+        action_header=$'   Enter connect   Tab details   alt-e edit   alt-d delete   alt-k key login\n   alt-p ping      alt-c copy      alt-r refresh        Esc close'
+    elif (( term_cols >= 68 )); then
+        action_header=$'   Enter connect  ·  Tab details  ·  alt-e edit  ·  alt-d delete\n   alt-k key  ·  alt-p ping  ·  alt-c copy  ·  alt-r refresh'
     else
-        action_header='   Enter connect  ·  Tab details'
+        action_header='   Enter connect  ·  Tab details  ·  alt-e edit  ·  alt-d delete'
     fi
 
+    # Keys avoid everything fzf already uses for navigation and line editing
+    # (ctrl-a/b/d/e/f/h/j/k/n/p/u/w/y, tab, shift-*, and alt-b/bs/d/f/up/down),
+    # so the picker still behaves like a normal finder: ctrl-j/k still move the
+    # cursor and ctrl-y still pastes. Business actions sit on alt-<mnemonic>.
     # Everything runs via `execute`, which returns to the picker (fzf redraws
-    # afterwards). `become` is avoided because it exits fzf entirely. Actions
-    # that prompt re-attach to the terminal themselves.
-    # esc closes the preview first and only aborts when no pane is open, so
-    # opening details with ctrl-e/Tab is not a one-way trip.
+    # afterwards); actions that prompt re-attach to the terminal themselves.
+    # esc closes the preview first and only aborts when no pane is open.
     local binds="tab:toggle-preview,alt-up:preview-up,alt-down:preview-down,esc:close"
-    binds+=",ctrl-e:toggle-preview"
-    binds+=",ctrl-p:execute-silent($ping_cmd)+reload($rows_cmd)"
-    binds+=",ctrl-y:execute-silent($copy_cmd)+change-header( copied SSH command)"
-    binds+=",ctrl-k:execute($key_install_cmd)+reload($rows_cmd)"
-    binds+=",ctrl-d:execute($delete_cmd)+reload($rows_cmd)"
+    binds+=",alt-p:execute-silent($ping_cmd)+reload($rows_cmd)"
+    binds+=",alt-c:execute-silent($copy_cmd)+change-header( copied SSH command)"
+    binds+=",alt-k:execute($key_install_cmd)+reload($rows_cmd)"
+    binds+=",alt-e:execute($edit_cmd)+reload($rows_cmd)"
+    binds+=",alt-d:execute($delete_cmd)+reload($rows_cmd)"
+    binds+=",alt-r:execute-silent($refresh_cmd)+reload($rows_cmd)"
+    # ctrl-r is fzf-idiomatic for refresh and is not a default binding.
     binds+=",ctrl-r:execute-silent($refresh_cmd)+reload($rows_cmd)"
 
     # Options that only newer fzf understands are added after a capability probe.
@@ -693,6 +698,59 @@ picker_action_record() {
     server_at_line "$line_id" "$servers"
 }
 
+prompt_field() {
+    # Ask for one field, defaulting to the current value on empty input.
+    # The prompt goes to stderr so it is never captured with the value.
+    local label="$1" current="$2" value
+    printf '%s [%s]: ' "$label" "$current" >&2
+    read -r value || return 1
+    value=$(trim_field "$value")
+    printf '%s\n' "${value:-$current}"
+}
+
+edit_server() {
+    # Interactively edit one server: name, host, port, user, group, note, and
+    # password. Empty input keeps the current value; validation matches add.
+    local record="$1"
+    local servers group name host port user pass desc
+    IFS='|' read -r group name host port user pass desc <<< "$record"
+    servers=$(parse_servers) || return 1
+
+    printf 'Editing %s (%s@%s:%s)\n' "$name" "$user" "$host" "$port"
+    printf 'Press Enter to keep the current value.\n\n'
+
+    local value
+    value=$(prompt_field 'Name' "$name") || return 1
+    name=$value
+    if [[ "$name" != "$(printf '%s' "$record" | cut -d'|' -f2)" ]]; then
+        validate_new_name "$name" "$servers" || { printf '[x] name not changed\n'; name=$(printf '%s' "$record" | cut -d'|' -f2); }
+    fi
+
+    value=$(prompt_field 'Host' "$host") || return 1
+    host=$value
+    value=$(prompt_field 'Port' "$port") || return 1
+    port=$value
+    value=$(prompt_field 'User' "$user") || return 1
+    user=$value
+    value=$(prompt_field 'Group' "$group") || return 1
+    group=$value
+    value=$(prompt_field 'Note' "$desc") || return 1
+    desc=$value
+
+    if ! validate_server "$name" "$host" "$port" "$user" \
+        || ! validate_field Password "$pass" || ! validate_field Note "$desc" \
+        || [[ "$group" == *'['* || "$group" == *']'* ]]; then
+        printf '[x] edit cancelled; no changes written\n'
+        return 1
+    fi
+
+    local new_entry
+    printf -v new_entry '%-18s | %-20s | %-5s | %-10s | %-12s | %s' \
+        "$name" "$host" "$port" "$user" "$pass" "$desc"
+    replace_entry_in_config "$record" "$group" "$new_entry" || return 1
+    printf '%b[ok]%b updated %s\n' "$GREEN" "$NC" "$name"
+}
+
 cmd_picker_action_silent() {
     # Side effects only, so the picker screen is never polluted.
     local key="$1" line_id="$2"
@@ -714,7 +772,9 @@ cmd_picker_action() {
     local record group name host port user pass desc choice status
     record=$(picker_action_record "$line_id") || { fail 'invalid server selection'; return 1; }
     IFS='|' read -r group name host port user pass desc <<< "$record"
-    if [[ -e /dev/tty ]]; then
+    # Only re-attach when a controlling terminal actually exists (fzf may leave
+    # stdin non-blocking). Without one, stdin is used as-is so piped input works.
+    if [[ -t 0 ]] && { : </dev/tty; } 2>/dev/null; then
         exec </dev/tty >/dev/tty 2>&1 || true
         stty sane 2>/dev/null || true
     fi
@@ -736,6 +796,9 @@ cmd_picker_action() {
             else
                 printf 'cancelled\n'
             fi
+            ;;
+        edit)
+            edit_server "$record"
             ;;
         *)
             fail "unknown handoff action '$key'"
@@ -881,6 +944,57 @@ delete_entry_from_config() {
         return 1
     fi
 
+    mv "$tmp" "$CONFIG_FILE"
+}
+
+replace_entry_in_config() {
+    # Edit one server record in a single pass. Same group keeps the entry at its
+    # position; a new group moves it into that group's section. Never delete
+    # first: the entry must not be lost if the rewrite fails.
+    local target_record="$1" new_group="$2" new_entry="$3"
+    local old_group tmp
+    old_group=$(printf '%s' "$target_record" | awk -F'|' '{ print $1 }')
+    tmp=$(mktemp "$CONFIG_DIR/.servers.XXXXXX")
+    if ! NOOK_OLD="$target_record" NOOK_NEW_GROUP="$new_group" NOOK_NEW_ENTRY="$new_entry" \
+         NOOK_OLD_GROUP="$old_group" awk -F'|' '
+        function trim(value) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); return value }
+        BEGIN {
+            old = ENVIRON["NOOK_OLD"]; new_group = ENVIRON["NOOK_NEW_GROUP"]
+            new_entry = ENVIRON["NOOK_NEW_ENTRY"]; old_group = ENVIRON["NOOK_OLD_GROUP"]
+            group = "default"; replaced = 0; moved_pending = (new_group != old_group)
+        }
+        /^[[:space:]]*$/ { print; next }
+        /^[[:space:]]*#/ { print; next }
+        {
+            line = trim($0)
+            if (line ~ /^\[.+\]$/) {
+                group = substr(line, 2, length(line) - 2)
+                # Append a moved entry right after its new group header.
+                if (moved_pending && group == new_group) {
+                    print; print new_entry; moved_pending = 0; next
+                }
+                print; next
+            }
+            port = trim($3); if (port == "") port = "22"
+            user = trim($4); if (user == "") user = "root"
+            candidate = group "|" trim($1) "|" trim($2) "|" port "|" user "|" trim($5) "|" trim($6)
+            if (!replaced && candidate == old) {
+                replaced = 1
+                if (!moved_pending) { print new_entry }
+                # when moving, the entry is written under the new group header
+                next
+            }
+            print
+        }
+        END {
+            if (!replaced) { exit 1 }
+            if (moved_pending) { print ""; print "[" new_group "]"; print new_entry }
+        }
+    ' "$CONFIG_FILE" > "$tmp"; then
+        rm -f "$tmp"
+        fail 'server entry changed; select it again before editing'
+        return 1
+    fi
     mv "$tmp" "$CONFIG_FILE"
 }
 

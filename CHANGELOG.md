@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format loosely follows Keep a Changelog.
 
+## [1.4.0] - 2026-10-07
+
+### Added
+
+- `alt-e` edits the highlighted server in place: name, host, port, user, group, note, and saved password. Empty input keeps a field, the name must stay unique, and changing the group moves the entry into that section. The rewrite is a single atomic pass, so a failed edit never drops the entry.
+- `--header` in the picker now lists every action key and adapts to the terminal width.
+
+### Changed
+
+- **Breaking:** picker action keys moved off fzf's navigation and line-editing bindings. `ctrl-k`, `ctrl-p`, `ctrl-n`, `ctrl-y`, `ctrl-e`, and `ctrl-d` are fzf defaults (cursor movement, match movement, yank, end-of-line, delete), so binding actions to them broke normal finder behaviour. Actions now use `alt-<mnemonic>`: `alt-e` edit, `alt-d` delete, `alt-k` key login, `alt-p` ping, `alt-c` copy, `alt-r` refresh. `Tab` (details) and `ctrl-r` (refresh) are unchanged. `Esc` still closes the details pane before cancelling.
+
 ## [1.3.3] - 2026-10-07
 
 ### Fixed

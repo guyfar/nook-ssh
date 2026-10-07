@@ -597,18 +597,53 @@ print(lines[0])
         self.assertIn(b'Choice:', output)
 
     def test_picker_actions_stay_in_the_picker(self):
-        # Actions must not exit the picker: no --expect (which exits on each key)
-        # and no become (which replaces fzf). Everything runs via execute, with
-        # side-effect-free actions silent or preview-only.
+        # Actions must not exit the picker: no --expect (which exits on each key),
+        # no become (which replaces fzf). Everything runs via execute, and the
+        # keys avoid fzf's own navigation/editing bindings.
         self.assert_ok(self.run_nk(NOOK_TEST_FZF='cancel'))
         args = json.loads((self.root / 'fzf-args.json').read_text())
         self.assertFalse([a for a in args if a.startswith('--expect')])
         binds = [a for a in args if a.startswith('--bind=')][0]
-        self.assertIn('ctrl-e:toggle-preview', binds)
+        self.assertIn('alt-e:execute', binds)      # edit
+        self.assertIn('alt-d:execute', binds)      # delete
+        self.assertIn('alt-k:execute', binds)      # key login
+        self.assertIn('alt-p:execute-silent', binds)
+        self.assertIn('alt-c:execute-silent', binds)
         self.assertIn('execute-silent', binds)
         self.assertNotIn('become', binds)
-        for key in ('ctrl-e', 'ctrl-p', 'ctrl-y', 'ctrl-k', 'ctrl-d', 'ctrl-r'):
-            self.assertIn(key, binds)
+        # No business action may steal a key fzf uses for navigation/editing.
+        for stolen in ('ctrl-k:', 'ctrl-j:', 'ctrl-n:', 'ctrl-p:', 'ctrl-y:',
+                       'ctrl-e:', 'ctrl-a:', 'ctrl-f:', 'ctrl-u:', 'ctrl-w:'):
+            self.assertNotIn(stolen, binds)
+
+    def test_edit_action_updates_in_place(self):
+        # Editing keeps the entry's position and applies the new note/port.
+        self.assert_ok(self.run_nk('__action', 'edit', '1',
+                                   input='\n\n2222\n\n\nchanged\n'))
+        catalog = self.catalog.read_text()
+        self.assertIn('changed', catalog)
+        self.assertIn('2222', catalog)
+        # Both servers survive the edit.
+        self.assertIn('web-prod', catalog)
+        self.assertIn('web-dev', catalog)
+        self.assert_ok(self.run_nk())
+
+    def test_edit_action_can_move_between_groups(self):
+        self.assert_ok(self.run_nk('__action', 'edit', '1',
+                                   input='\n\n\n\nstaging\n\n'))
+        catalog = self.catalog.read_text()
+        self.assertIn('[staging]', catalog)
+        self.assertIn('web-prod', catalog)
+        self.assertEqual(catalog.count('web-prod'), 1)
+        self.assert_ok(self.run_nk())
+
+    def test_edit_action_rejects_duplicate_name_without_losing_data(self):
+        before = self.catalog.read_text()
+        self.assert_ok(self.run_nk('__action', 'edit', '1',
+                                   input='web-dev\n\n\n\n\n\n'))
+        after = self.catalog.read_text()
+        self.assertIn('web-prod', after)   # renamed attempt was rejected
+        self.assertEqual(after.count('|'), before.count('|'))
 
     def test_picker_action_does_not_connect(self):
         # A keybind action must never fall through to a connection.

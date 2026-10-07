@@ -29,8 +29,8 @@ In a terminal, an invalid address, port, or name prompts you to correct that fie
 
 - `nk`: search names, hosts, usernames, groups, or notes. Recently used servers appear first.
 - `nk <name>`: connect immediately when the name matches exactly one entry; otherwise open the picker.
-- In the picker, actions run on the highlighted server: **Enter** connect, **ctrl-k** configure key login, **ctrl-p** check reachability, **ctrl-y** copy the SSH command, **ctrl-e** show full details, **ctrl-d** remove, **Tab** preview, **ctrl-r** refresh status, **Esc** cancel.
-- Actions keep you in the picker: details appear in the preview pane, and pings or removals refresh the list in place. The action bar adapts to the terminal width.
+- In the picker, actions run on the highlighted server: **Enter** connect, **alt-e** edit, **alt-d** remove, **alt-k** configure key login, **alt-p** check reachability, **alt-c** copy the SSH command, **alt-r** refresh status, **Tab** toggle details, **Esc** close details or cancel.
+- Actions keep you in the picker and use `alt-` keys so fzf's own navigation (`ctrl-j`/`ctrl-k`, `ctrl-n`/`ctrl-p`, `ctrl-y`) keeps working. The action bar adapts to the terminal width.
 - Columns show the name, group, full `user@host:port`, note, how long ago it was last used, and reachability. Details add login method, status, and a manual SSH command; use **Alt+Up/Down** to scroll.
 - Status comes from the last `nk ping` and is never checked on startup, so the picker stays fast. A trailing `*` means the reading is over an hour old. Press **ctrl-r** in the picker, or run `nk ping`, to refresh it.
 - When a connection fails in a terminal, Nook offers a small menu (`p` ping, `k` key login, `e` edit, `c` copy command) instead of exiting silently.
