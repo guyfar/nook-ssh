@@ -48,6 +48,16 @@ nk add --advanced
 
 保存的密码以明文写入本地配置，文件权限为 `600`。自动填写保存的密码需要 `sshpass`；未安装时使用普通 SSH 登录。
 
+## macOS 说明
+
+选择器的快捷键使用 `alt-` 组合键。在 macOS 上 `alt` 就是 **`⌥` Option 键**，而终端默认把 Option+字母当作输入特殊字符，因此需要先开启 Alt 才能生效：
+
+- **Ghostty**：在 `~/.config/ghostty/config` 添加 `macos-option-as-alt = true`，然后重载配置。
+- **iTerm2**：Profiles > Keys，把 Left/Right Option key 设为 `Esc+`。
+- **Terminal.app**：Profiles > Keyboard，勾选 **Use Option as Meta key**。
+
+验证方法：运行 `cat -v` 后按 Option+e，显示 `^[e` 即为正常。若只希望转换左 Option 键，可设为 `macos-option-as-alt = left`。
+
 ## 其他命令
 
 | 命令 | 功能 |

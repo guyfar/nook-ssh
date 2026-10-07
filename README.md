@@ -47,6 +47,16 @@ nk add --advanced
 
 Saved passwords are stored as plain text in the local config, with file permissions set to `600`. Automatically filling a saved password requires `sshpass`; without it, Nook uses normal SSH login.
 
+## macOS note
+
+Picker actions use the `alt-` keys. On macOS that is the **Option (`⌥`) key**, and terminals send Option+key as Unicode by default, so the shortcuts will not reach Nook until Alt is enabled:
+
+- **Ghostty**: add `macos-option-as-alt = true` to `~/.config/ghostty/config`, then reload the config.
+- **iTerm2**: Profiles > Keys > set Left/Right Option key to `Esc+`.
+- **Terminal.app**: Profiles > Keyboard > enable **Use Option as Meta key**.
+
+Verify by running `cat -v` and pressing Option+e: `^[e` means it works. Use `macos-option-as-alt = left` if you only want the left Option key converted.
+
 ## Other commands
 
 | Command | Description |
